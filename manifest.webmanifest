@@ -1,0 +1,17 @@
+{
+  "name": "Simulador de Circuitos DC",
+  "short_name": "Circuitos DC",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#e5ecf2",
+  "theme_color": "#0f172a",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

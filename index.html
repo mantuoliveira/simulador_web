@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Simulador de Circuitos DC</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app-shell">
+      <header id="top-bar" aria-label="Menu de componentes">
+        <div id="component-strip" class="scroll-x"></div>
+      </header>
+
+      <main id="canvas-wrap">
+        <canvas id="circuit-canvas" aria-label="Área do circuito"></canvas>
+        <div id="status-pill" aria-live="polite"></div>
+      </main>
+
+      <div id="value-wheel" class="hidden" aria-label="Roda de valores">
+        <div class="wheel-ring"></div>
+        <div class="wheel-pointer"></div>
+        <div class="wheel-center">
+          <div id="wheel-title">Valor</div>
+          <div id="wheel-value">-</div>
+        </div>
+      </div>
+
+      <footer id="bottom-bar">
+        <button id="simulate-btn" class="primary" type="button">Simular</button>
+        <button id="rotate-btn" class="secondary hidden" type="button" title="Rotacionar 90°">
+          ↻
+        </button>
+      </footer>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
