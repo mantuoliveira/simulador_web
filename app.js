@@ -1591,7 +1591,7 @@ function valueFromNormalized(type, normalized) {
   }
 
   if (type === "current_source") {
-    return snapToStep((-1 + 2 * n), 0.0001);
+    return snapToStep((-0.1 + 0.2 * n), 0.001);
   }
 
   return 0;
@@ -1611,7 +1611,7 @@ function normalizedFromValue(component) {
   }
 
   if (component.type === "current_source") {
-    return clamp((value + 1) / 2, 0, 1);
+    return clamp((value + 0.1) / 0.2, 0, 1);
   }
 
   return 0;
@@ -1890,13 +1890,19 @@ function runSimulation() {
     }
   }
 
+  const groundMarkerPoints = groundTerminals
+    .map((terminal) => terminalPosition.get(terminal))
+    .filter(Boolean);
+
   const nodeMarkers = [];
   for (const [root, points] of markerGroups.entries()) {
-    if (!points.length) continue;
-    const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : points;
+    if (!markerPoints.length) continue;
+
+    const sum = markerPoints.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
     nodeMarkers.push({
-      x: sum.x / points.length,
-      y: sum.y / points.length,
+      x: sum.x / markerPoints.length,
+      y: sum.y / markerPoints.length,
       voltage: nodeVoltageByRoot.get(root) || 0,
     });
   }
