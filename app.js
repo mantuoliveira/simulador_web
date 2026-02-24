@@ -1,6 +1,8 @@
 const GRID_SIZE = 28;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3.2;
+const IDLE_FPS = 1;
+const IDLE_FRAME_MS = 1000 / IDLE_FPS;
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -156,6 +158,12 @@ let lastCanvasW = 0;
 let lastCanvasH = 0;
 let statusTimer = null;
 
+const renderState = {
+  rafId: null,
+  idleTimerId: null,
+  dirty: true,
+};
+
 const wheelState = {
   dragging: false,
   pointerId: null,
@@ -170,8 +178,7 @@ setupCanvasGestures();
 setupWheelGestures();
 setupNativeZoomGuards();
 setupServiceWorker();
-
-requestAnimationFrame(renderLoop);
+setupRenderLoop();
 
 function loadSprites() {
   const sprites = {};
@@ -229,6 +236,7 @@ function resizeCanvas() {
 
   lastCanvasW = width;
   lastCanvasH = height;
+  requestRender(true);
 }
 
 function setupButtons() {
@@ -499,9 +507,85 @@ function setupServiceWorker() {
   });
 }
 
+function setupRenderLoop() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      cancelScheduledRender();
+      return;
+    }
+    requestRender(true);
+  });
+
+  requestRender(true);
+}
+
+function isHighFpsInteractionActive() {
+  return (
+    state.pointer.mode === "drag" ||
+    state.pointer.mode === "pan" ||
+    state.pointer.mode === "panzoom" ||
+    state.pointer.mode === "mouse-drag" ||
+    wheelState.dragging
+  );
+}
+
+function cancelScheduledRender() {
+  if (renderState.rafId != null) {
+    cancelAnimationFrame(renderState.rafId);
+    renderState.rafId = null;
+  }
+
+  if (renderState.idleTimerId != null) {
+    clearTimeout(renderState.idleTimerId);
+    renderState.idleTimerId = null;
+  }
+}
+
+function requestRender(immediate = false) {
+  renderState.dirty = true;
+  scheduleRender(immediate);
+}
+
+function scheduleRender(immediate = false) {
+  if (document.hidden) return;
+
+  const interacting = isHighFpsInteractionActive();
+  if (immediate || interacting || renderState.dirty) {
+    if (renderState.idleTimerId != null) {
+      clearTimeout(renderState.idleTimerId);
+      renderState.idleTimerId = null;
+    }
+
+    if (renderState.rafId == null) {
+      renderState.rafId = requestAnimationFrame(renderLoop);
+    }
+    return;
+  }
+
+  if (renderState.rafId != null || renderState.idleTimerId != null) return;
+
+  renderState.idleTimerId = setTimeout(() => {
+    renderState.idleTimerId = null;
+    if (document.hidden) return;
+    if (renderState.rafId == null) {
+      renderState.rafId = requestAnimationFrame(renderLoop);
+    }
+  }, IDLE_FRAME_MS);
+}
+
 function renderLoop() {
+  renderState.rafId = null;
+  if (document.hidden) return;
+
   drawScene();
-  requestAnimationFrame(renderLoop);
+  renderState.dirty = false;
+
+  if (isHighFpsInteractionActive()) {
+    renderState.rafId = requestAnimationFrame(renderLoop);
+    return;
+  }
+
+  scheduleRender(false);
 }
 
 function drawScene() {
@@ -826,12 +910,14 @@ function startPan(touch) {
   state.pointer.initialMidY = point.y;
   state.pointer.initialOffsetX = state.camera.offsetX;
   state.pointer.initialOffsetY = state.camera.offsetY;
+  requestRender(true);
 }
 
 function movePan(touch) {
   const point = clientToCanvas(touch.clientX, touch.clientY);
   state.camera.offsetX = state.pointer.initialOffsetX + (point.x - state.pointer.initialMidX);
   state.camera.offsetY = state.pointer.initialOffsetY + (point.y - state.pointer.initialMidY);
+  requestRender();
 }
 
 function startPinch(touches) {
@@ -854,6 +940,7 @@ function startPinch(touches) {
   const world = screenToWorld(midX, midY, state.pointer.initialZoom, state.pointer.initialOffsetX, state.pointer.initialOffsetY);
   state.pointer.worldAtMidX = world.x;
   state.pointer.worldAtMidY = world.y;
+  requestRender(true);
 }
 
 function movePinch(touches) {
@@ -871,6 +958,7 @@ function movePinch(touches) {
   state.camera.zoom = newZoom;
   state.camera.offsetX = midX - state.pointer.worldAtMidX * GRID_SIZE * newZoom;
   state.camera.offsetY = midY - state.pointer.worldAtMidY * GRID_SIZE * newZoom;
+  requestRender();
 }
 
 function zoomAroundPoint(screenX, screenY, targetZoom) {
@@ -879,6 +967,7 @@ function zoomAroundPoint(screenX, screenY, targetZoom) {
   state.camera.zoom = newZoom;
   state.camera.offsetX = screenX - world.x * GRID_SIZE * newZoom;
   state.camera.offsetY = screenY - world.y * GRID_SIZE * newZoom;
+  requestRender();
 }
 
 function findTouchById(touchList, id) {
@@ -896,18 +985,21 @@ function handleTerminalTap(componentId, terminalIndex) {
 
   if (!state.pendingTerminal) {
     state.pendingTerminal = { componentId, terminalIndex };
+    requestRender(true);
     return;
   }
 
   const first = state.pendingTerminal;
   if (first.componentId === componentId && first.terminalIndex === terminalIndex) {
     state.pendingTerminal = null;
+    requestRender(true);
     return;
   }
 
   if (first.componentId === componentId) {
     showStatus("Conexão no mesmo componente não permitida", true);
     state.pendingTerminal = null;
+    requestRender(true);
     return;
   }
 
@@ -921,6 +1013,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   ) {
     showStatus("Conexão já existe", true);
     state.pendingTerminal = null;
+    requestRender(true);
     return;
   }
 
@@ -928,6 +1021,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   const end = getTerminalPosition(componentId, terminalIndex);
   if (!start || !end) {
     state.pendingTerminal = null;
+    requestRender(true);
     return;
   }
 
@@ -935,6 +1029,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   if (!route) {
     showStatus("Não foi possível rotear o fio", true);
     state.pendingTerminal = null;
+    requestRender(true);
     return;
   }
 
@@ -1420,6 +1515,8 @@ function removeWire(wireId) {
 }
 
 function updateSelectionUi() {
+  requestRender(true);
+
   const component = getComponentById(state.selectedComponentId);
   const wire = getWireById(state.selectedWireId);
 
@@ -1880,6 +1977,7 @@ function onCircuitChanged() {
   }
 
   syncWheelWithSelectedComponent();
+  requestRender(true);
 }
 
 function showStatus(text, isError = false) {
