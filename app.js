@@ -111,6 +111,7 @@ const state = {
   nextComponentId: 1,
   nextWireId: 1,
   selectedComponentId: null,
+  selectedWireId: null,
   pendingTerminal: null,
   simulationActive: false,
   simulationResult: null,
@@ -276,8 +277,14 @@ function setupButtons() {
   });
 
   appEls.deleteBtn.addEventListener("click", () => {
-    if (state.selectedComponentId == null) return;
-    removeComponent(state.selectedComponentId);
+    if (state.selectedComponentId != null) {
+      removeComponent(state.selectedComponentId);
+      return;
+    }
+
+    if (state.selectedWireId != null) {
+      removeWire(state.selectedWireId);
+    }
   });
 }
 
@@ -372,9 +379,16 @@ function setupCanvasGestures() {
       state.pointer.dragComponentId = compHit.id;
       state.pointer.dragOffsetX = point.x - compHit.x;
       state.pointer.dragOffsetY = point.y - compHit.y;
-    } else {
-      clearSelection();
+      return;
     }
+
+    const wireHit = pickWire(point.x, point.y);
+    if (wireHit) {
+      selectWire(wireHit.id);
+      return;
+    }
+
+    clearSelection();
   });
 
   window.addEventListener("mousemove", (event) => {
@@ -540,8 +554,9 @@ function drawWires() {
       }
     });
 
-    ctx.lineWidth = Math.max(2.1, state.camera.zoom * 2.4);
-    ctx.strokeStyle = "#0f172a";
+    const isSelected = state.selectedWireId === wire.id;
+    ctx.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
+    ctx.strokeStyle = isSelected ? "#ea580c" : "#0f172a";
     ctx.stroke();
   }
 }
@@ -662,15 +677,32 @@ function drawCurrentArrow(component, current) {
   const normalX = -dirY;
   const normalY = dirX;
   const shaftHalf = 1.05;
-  const lateralOffset = 1.0;
+  let sideSign = 1;
+  let lateralOffset = 1.0;
+
+  if (component.type === "voltage_source" || component.type === "current_source") {
+    // Keep source current arrows farther away from circular symbols.
+    lateralOffset = 1.45;
+  }
+
+  if (component.type === "resistor") {
+    // Keep resistor current arrow opposite to the resistor value label.
+    const label = getValueLabelAnchor(component);
+    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
+    sideSign = labelProjection >= 0 ? -1 : 1;
+    lateralOffset = 1.2;
+  }
+
+  const sideNormalX = normalX * sideSign;
+  const sideNormalY = normalY * sideSign;
 
   const start = {
-    x: midX - dirX * shaftHalf + normalX * lateralOffset,
-    y: midY - dirY * shaftHalf + normalY * lateralOffset,
+    x: midX - dirX * shaftHalf + sideNormalX * lateralOffset,
+    y: midY - dirY * shaftHalf + sideNormalY * lateralOffset,
   };
   const end = {
-    x: midX + dirX * shaftHalf + normalX * lateralOffset,
-    y: midY + dirY * shaftHalf + normalY * lateralOffset,
+    x: midX + dirX * shaftHalf + sideNormalX * lateralOffset,
+    y: midY + dirY * shaftHalf + sideNormalY * lateralOffset,
   };
 
   const s = worldToScreen(start.x, start.y);
@@ -688,25 +720,31 @@ function drawCurrentArrow(component, current) {
   const arrowLen = Math.max(12, state.camera.zoom * 14);
   const arrowSpread = 0.46;
   const angle = Math.atan2(e.y - s.y, e.x - s.x);
+  const tipAdvance = Math.max(2.2, ctx.lineWidth * 0.9);
+  const tipX = e.x + Math.cos(angle) * tipAdvance;
+  const tipY = e.y + Math.sin(angle) * tipAdvance;
   ctx.beginPath();
-  ctx.moveTo(e.x, e.y);
+  ctx.moveTo(tipX, tipY);
   ctx.lineTo(
-    e.x - arrowLen * Math.cos(angle - arrowSpread),
-    e.y - arrowLen * Math.sin(angle - arrowSpread)
+    tipX - arrowLen * Math.cos(angle - arrowSpread),
+    tipY - arrowLen * Math.sin(angle - arrowSpread)
   );
   ctx.lineTo(
-    e.x - arrowLen * Math.cos(angle + arrowSpread),
-    e.y - arrowLen * Math.sin(angle + arrowSpread)
+    tipX - arrowLen * Math.cos(angle + arrowSpread),
+    tipY - arrowLen * Math.sin(angle + arrowSpread)
   );
   ctx.closePath();
   ctx.fill();
 
   const text = formatCurrent(signed);
+  const textOffset = Math.max(12, state.camera.zoom * 13);
+  const textX = (s.x + e.x) * 0.5 + sideNormalX * textOffset;
+  const textY = (s.y + e.y) * 0.5 + sideNormalY * textOffset;
   ctx.font = '12px "Avenir Next", sans-serif';
   ctx.fillStyle = "#7f1d1d";
   ctx.textAlign = "center";
-  ctx.textBaseline = "bottom";
-  ctx.fillText(text, (s.x + e.x) / 2, (s.y + e.y) / 2 - 7);
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, textX, textY);
 }
 
 function startSingleTouch(touch) {
@@ -720,18 +758,25 @@ function startSingleTouch(touch) {
   }
 
   const componentHit = pickComponentBody(point.x, point.y);
-  if (!componentHit) {
-    clearSelection();
+  if (componentHit) {
+    selectComponent(componentHit.id);
+    state.pointer.mode = "drag";
+    state.pointer.activeTouchId = touch.identifier;
+    state.pointer.dragComponentId = componentHit.id;
+    state.pointer.dragOffsetX = point.x - componentHit.x;
+    state.pointer.dragOffsetY = point.y - componentHit.y;
+    return;
+  }
+
+  const wireHit = pickWire(point.x, point.y);
+  if (wireHit) {
+    selectWire(wireHit.id);
     state.pointer.mode = "none";
     return;
   }
 
-  selectComponent(componentHit.id);
-  state.pointer.mode = "drag";
-  state.pointer.activeTouchId = touch.identifier;
-  state.pointer.dragComponentId = componentHit.id;
-  state.pointer.dragOffsetX = point.x - componentHit.x;
-  state.pointer.dragOffsetY = point.y - componentHit.y;
+  clearSelection();
+  state.pointer.mode = "none";
 }
 
 function moveDrag(touch) {
@@ -802,6 +847,11 @@ function findTouchById(touchList, id) {
 }
 
 function handleTerminalTap(componentId, terminalIndex) {
+  if (state.selectedWireId != null) {
+    state.selectedWireId = null;
+    updateSelectionUi();
+  }
+
   if (!state.pendingTerminal) {
     state.pendingTerminal = { componentId, terminalIndex };
     return;
@@ -1223,6 +1273,26 @@ function pickComponentBody(worldX, worldY) {
   return null;
 }
 
+function pickWire(worldX, worldY) {
+  const threshold = clamp(9 / (GRID_SIZE * state.camera.zoom), 0.12, 0.46);
+
+  for (let i = state.wires.length - 1; i >= 0; i -= 1) {
+    const wire = state.wires[i];
+    const path = wire.path;
+    if (!path || path.length < 2) continue;
+
+    for (let j = 0; j < path.length - 1; j += 1) {
+      const a = path[j];
+      const b = path[j + 1];
+      if (distanceToSegment(worldX, worldY, a.x, a.y, b.x, b.y) <= threshold) {
+        return wire;
+      }
+    }
+  }
+
+  return null;
+}
+
 function pointInsideComponentBody(component, worldX, worldY) {
   const def = COMPONENT_DEFS[component.type];
   const local = worldToLocal(component, worldX, worldY);
@@ -1248,12 +1318,21 @@ function worldToLocal(component, worldX, worldY) {
 
 function selectComponent(componentId) {
   state.selectedComponentId = componentId;
+  state.selectedWireId = null;
+  state.pendingTerminal = null;
+  updateSelectionUi();
+}
+
+function selectWire(wireId) {
+  state.selectedWireId = wireId;
+  state.selectedComponentId = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
 
 function clearSelection() {
   state.selectedComponentId = null;
+  state.selectedWireId = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
@@ -1275,22 +1354,49 @@ function removeComponent(componentId) {
     state.selectedComponentId = null;
   }
 
+  if (state.selectedWireId != null && !getWireById(state.selectedWireId)) {
+    state.selectedWireId = null;
+  }
+
   updateSelectionUi();
   onCircuitChanged();
   showStatus("Componente removido");
 }
 
+function removeWire(wireId) {
+  const before = state.wires.length;
+  state.wires = state.wires.filter((wire) => wire.id !== wireId);
+  if (state.wires.length === before) return;
+
+  if (state.selectedWireId === wireId) {
+    state.selectedWireId = null;
+  }
+
+  updateSelectionUi();
+  onCircuitChanged();
+  showStatus("Conector removido");
+}
+
 function updateSelectionUi() {
   const component = getComponentById(state.selectedComponentId);
-  if (!component) {
+  const wire = getWireById(state.selectedWireId);
+
+  if (!component && !wire) {
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
     appEls.valueWheel.classList.add("hidden");
     return;
   }
 
-  appEls.rotateBtn.classList.remove("hidden");
   appEls.deleteBtn.classList.remove("hidden");
+
+  if (!component) {
+    appEls.rotateBtn.classList.add("hidden");
+    appEls.valueWheel.classList.add("hidden");
+    return;
+  }
+
+  appEls.rotateBtn.classList.remove("hidden");
 
   const def = COMPONENT_DEFS[component.type];
   if (!def.editable) {
@@ -1416,6 +1522,11 @@ function isTerminalConnected(componentId, terminalIndex) {
 function getComponentById(id) {
   if (id == null) return null;
   return state.components.find((component) => component.id === id) || null;
+}
+
+function getWireById(id) {
+  if (id == null) return null;
+  return state.wires.find((wire) => wire.id === id) || null;
 }
 
 function getValueLabelAnchor(component) {
@@ -1836,6 +1947,23 @@ function degToRad(deg) {
 
 function distance(x1, y1, x2, y2) {
   return Math.hypot(x2 - x1, y2 - y1);
+}
+
+function distanceToSegment(px, py, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const denom = abx * abx + aby * aby;
+
+  if (denom < 1e-12) {
+    return Math.hypot(px - ax, py - ay);
+  }
+
+  const t = clamp((apx * abx + apy * aby) / denom, 0, 1);
+  const cx = ax + t * abx;
+  const cy = ay + t * aby;
+  return Math.hypot(px - cx, py - cy);
 }
 
 function formatComponentValue(component) {
