@@ -1587,11 +1587,11 @@ function valueFromNormalized(type, normalized) {
   }
 
   if (type === "voltage_source") {
-    return roundTo((-24 + 48 * n), 2);
+    return roundTo((-24 + 48 * n), 1);
   }
 
   if (type === "current_source") {
-    return roundTo((-1 + 2 * n), 4);
+    return snapToStep((-0.1 + 0.2 * n), 0.001);
   }
 
   return 0;
@@ -1611,7 +1611,7 @@ function normalizedFromValue(component) {
   }
 
   if (component.type === "current_source") {
-    return clamp((value + 1) / 2, 0, 1);
+    return clamp((value + 0.1) / 0.2, 0, 1);
   }
 
   return 0;
@@ -1804,7 +1804,7 @@ function runSimulation() {
     const n1 = getNodeIdx(r1);
 
     if (component.type === "resistor") {
-      const R = Math.max(1e-9, component.value || 1);
+      const R = safeResistance(component.value);
       const g = 1 / R;
 
       if (n0 >= 0) A[n0][n0] += g;
@@ -1866,7 +1866,7 @@ function runSimulation() {
     const v1 = nodeVoltageByRoot.get(r1) ?? 0;
 
     if (component.type === "resistor") {
-      componentCurrents.set(component.id, (v0 - v1) / component.value);
+      componentCurrents.set(component.id, (v0 - v1) / safeResistance(component.value));
     } else if (component.type === "current_source") {
       componentCurrents.set(component.id, component.value || 0);
     }
@@ -1890,13 +1890,19 @@ function runSimulation() {
     }
   }
 
+  const groundMarkerPoints = groundTerminals
+    .map((terminal) => terminalPosition.get(terminal))
+    .filter(Boolean);
+
   const nodeMarkers = [];
   for (const [root, points] of markerGroups.entries()) {
-    if (!points.length) continue;
-    const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : points;
+    if (!markerPoints.length) continue;
+
+    const sum = markerPoints.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
     nodeMarkers.push({
-      x: sum.x / points.length,
-      y: sum.y / points.length,
+      x: sum.x / markerPoints.length,
+      y: sum.y / markerPoints.length,
       voltage: nodeVoltageByRoot.get(root) || 0,
     });
   }
@@ -2078,6 +2084,18 @@ function roundTo(value, decimals) {
   return Math.round(value * m) / m;
 }
 
+function snapToStep(value, step) {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return value;
+  const snapped = Math.round(value / step) * step;
+  const decimals = Math.max(0, Math.round(-Math.log10(step)));
+  return roundTo(snapped, decimals);
+}
+
+function safeResistance(value) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1e-9, value);
+}
+
 function normalizeRotation(rotation) {
   return ((rotation % 360) + 360) % 360;
 }
@@ -2173,10 +2191,10 @@ function buildSvgForType(type) {
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
         <line x1="0" y1="40" x2="42" y2="40"/>
         <line x1="118" y1="40" x2="160" y2="40"/>
-        <circle cx="80" cy="40" r="38"/>
-        <line x1="56" y1="40" x2="76" y2="40"/>
-        <line x1="94" y1="30" x2="94" y2="50"/>
-        <line x1="84" y1="40" x2="104" y2="40"/>
+        <circle cx="80" cy="40" r="37"/>
+        <line x1="58" y1="40" x2="74" y2="40"/>
+        <line x1="94" y1="32" x2="94" y2="48"/>
+        <line x1="86" y1="40" x2="102" y2="40"/>
       </g>
     </svg>`;
   }
@@ -2186,7 +2204,7 @@ function buildSvgForType(type) {
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
         <line x1="0" y1="40" x2="42" y2="40"/>
         <line x1="118" y1="40" x2="160" y2="40"/>
-        <circle cx="80" cy="40" r="38"/>
+        <circle cx="80" cy="40" r="37"/>
       </g>
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
         <line x1="58" y1="40" x2="102" y2="40"/>
