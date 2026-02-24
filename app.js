@@ -321,6 +321,14 @@ function setupCanvasGestures() {
         if (touch) {
           moveDrag(touch);
         }
+        return;
+      }
+
+      if (state.pointer.mode === "pan" && event.touches.length >= 1) {
+        const touch = findTouchById(event.touches, state.pointer.activeTouchId);
+        if (touch) {
+          movePan(touch);
+        }
       }
     },
     { passive: false }
@@ -346,6 +354,17 @@ function setupCanvasGestures() {
           state.pointer.mode = "none";
           state.pointer.activeTouchId = null;
           state.pointer.dragComponentId = null;
+        }
+        return;
+      }
+
+      if (state.pointer.mode === "pan") {
+        const ended = Array.from(event.changedTouches).some(
+          (touch) => touch.identifier === state.pointer.activeTouchId
+        );
+        if (ended) {
+          state.pointer.mode = "none";
+          state.pointer.activeTouchId = null;
         }
       }
     },
@@ -612,11 +631,11 @@ function drawComponents() {
       const labelPoint = getValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = formatComponentValue(component);
-      ctx.font = `${Math.max(11, 11 * state.camera.zoom)}px "Avenir Next", sans-serif`;
+      ctx.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
       ctx.fillStyle = "#0f172a";
-      ctx.textAlign = "left";
+      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(valueText, screenPoint.x + 6, screenPoint.y);
+      ctx.fillText(valueText, screenPoint.x, screenPoint.y);
     }
   }
 }
@@ -740,7 +759,7 @@ function drawCurrentArrow(component, current) {
   const textOffset = Math.max(12, state.camera.zoom * 13);
   const textX = (s.x + e.x) * 0.5 + sideNormalX * textOffset;
   const textY = (s.y + e.y) * 0.5 + sideNormalY * textOffset;
-  ctx.font = '12px "Avenir Next", sans-serif';
+  ctx.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
   ctx.fillStyle = "#7f1d1d";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -776,7 +795,7 @@ function startSingleTouch(touch) {
   }
 
   clearSelection();
-  state.pointer.mode = "none";
+  startPan(touch);
 }
 
 function moveDrag(touch) {
@@ -790,6 +809,22 @@ function moveDrag(touch) {
   if (targetX === component.x && targetY === component.y) return;
 
   tryMoveComponent(component.id, targetX, targetY);
+}
+
+function startPan(touch) {
+  const point = clientToCanvas(touch.clientX, touch.clientY);
+  state.pointer.mode = "pan";
+  state.pointer.activeTouchId = touch.identifier;
+  state.pointer.initialMidX = point.x;
+  state.pointer.initialMidY = point.y;
+  state.pointer.initialOffsetX = state.camera.offsetX;
+  state.pointer.initialOffsetY = state.camera.offsetY;
+}
+
+function movePan(touch) {
+  const point = clientToCanvas(touch.clientX, touch.clientY);
+  state.camera.offsetX = state.pointer.initialOffsetX + (point.x - state.pointer.initialMidX);
+  state.camera.offsetY = state.pointer.initialOffsetY + (point.y - state.pointer.initialMidY);
 }
 
 function startPinch(touches) {
@@ -1531,11 +1566,12 @@ function getWireById(id) {
 
 function getValueLabelAnchor(component) {
   const rotation = normalizeRotation(component.rotation);
+  const offset = 1.62;
 
-  if (rotation === 0) return { x: component.x, y: component.y - 1.45 };
-  if (rotation === 90) return { x: component.x + 1.45, y: component.y };
-  if (rotation === 180) return { x: component.x, y: component.y + 1.45 };
-  return { x: component.x - 1.45, y: component.y };
+  if (rotation === 0) return { x: component.x, y: component.y - offset };
+  if (rotation === 90) return { x: component.x + offset, y: component.y };
+  if (rotation === 180) return { x: component.x, y: component.y + offset };
+  return { x: component.x - offset, y: component.y };
 }
 
 function runSimulation() {
