@@ -704,6 +704,13 @@ function drawCurrentArrow(component, current) {
     lateralOffset = 1.45;
   }
 
+  if (component.type === "voltage_source") {
+    // Keep voltage source current arrow opposite to the source value label.
+    const label = getValueLabelAnchor(component);
+    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
+    sideSign = labelProjection >= 0 ? -1 : 1;
+  }
+
   if (component.type === "resistor") {
     // Keep resistor current arrow opposite to the resistor value label.
     const label = getValueLabelAnchor(component);

@@ -10,7 +10,8 @@
   --shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
   --radius: 16px;
   --top-h: 76px;
-  --bottom-h: 78px;
+  --bottom-content-h: 76px;
+  --bottom-h: calc(var(--bottom-content-h) + env(safe-area-inset-bottom));
 }
 
 * {
@@ -225,7 +226,7 @@ button.secondary.danger {
 #value-wheel {
   position: fixed;
   right: 14px;
-  bottom: calc(var(--bottom-h) + 10px + env(safe-area-inset-bottom));
+  bottom: calc(var(--bottom-h) + 10px);
   width: 132px;
   height: 132px;
   border-radius: 50%;
