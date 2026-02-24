@@ -2,7 +2,10 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no"
+    />
     <meta name="theme-color" content="#0f172a" />
     <title>Simulador de Circuitos DC</title>
     <link rel="manifest" href="manifest.webmanifest" />
@@ -32,6 +35,19 @@
         <button id="simulate-btn" class="primary" type="button">Simular</button>
         <button id="rotate-btn" class="secondary hidden" type="button" title="Rotacionar 90°">
           ↻
+        </button>
+        <button
+          id="delete-btn"
+          class="secondary danger hidden"
+          type="button"
+          title="Excluir componente"
+          aria-label="Excluir componente"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 12H7L6 9z"
+            />
+          </svg>
         </button>
       </footer>
     </div>

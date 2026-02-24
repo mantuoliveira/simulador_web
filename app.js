@@ -141,6 +141,7 @@ const appEls = {
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
+  deleteBtn: document.getElementById("delete-btn"),
   status: document.getElementById("status-pill"),
   valueWheel: document.getElementById("value-wheel"),
   wheelPointer: document.querySelector(".wheel-pointer"),
@@ -166,6 +167,7 @@ setupCanvas();
 setupButtons();
 setupCanvasGestures();
 setupWheelGestures();
+setupNativeZoomGuards();
 setupServiceWorker();
 
 requestAnimationFrame(renderLoop);
@@ -271,6 +273,11 @@ function setupButtons() {
     }
 
     onCircuitChanged();
+  });
+
+  appEls.deleteBtn.addEventListener("click", () => {
+    if (state.selectedComponentId == null) return;
+    removeComponent(state.selectedComponentId);
   });
 }
 
@@ -432,6 +439,24 @@ function setupWheelGestures() {
     wheelState.dragging = false;
     wheelState.pointerId = null;
   });
+}
+
+function setupNativeZoomGuards() {
+  document.addEventListener(
+    "dblclick",
+    (event) => {
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+
+  const preventGesture = (event) => {
+    event.preventDefault();
+  };
+
+  document.addEventListener("gesturestart", preventGesture, { passive: false });
+  document.addEventListener("gesturechange", preventGesture, { passive: false });
+  document.addEventListener("gestureend", preventGesture, { passive: false });
 }
 
 function setupServiceWorker() {
@@ -872,28 +897,63 @@ function addComponent(type) {
 }
 
 function findEmptySpot(type) {
+  const def = COMPONENT_DEFS[type];
+  if (!def) return null;
+
   const center = screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
-  const baseX = Math.round(center.x);
-  const baseY = Math.round(center.y);
-  const step = 5;
+  const visible = getVisibleWorldBounds();
+  const margin = 1;
+
+  const minX = Math.ceil(visible.minX + def.footprintHalf.x + margin);
+  const maxX = Math.floor(visible.maxX - def.footprintHalf.x - margin);
+  const minY = Math.ceil(visible.minY + def.footprintHalf.y + margin);
+  const maxY = Math.floor(visible.maxY - def.footprintHalf.y - margin);
+
+  if (minX > maxX || minY > maxY) return null;
+
+  const baseX = clamp(Math.round(center.x), minX, maxX);
+  const baseY = clamp(Math.round(center.y), minY, maxY);
 
   const candidate = { id: -1, type, x: baseX, y: baseY, rotation: 0 };
   if (isComponentPlacementValid(candidate, null, 2)) {
     return { x: baseX, y: baseY };
   }
 
-  const maxRing = 28;
+  const maxRing = Math.max(maxX - minX, maxY - minY);
   for (let ring = 1; ring <= maxRing; ring += 1) {
-    for (let dx = -ring; dx <= ring; dx += 1) {
-      for (let dy = -ring; dy <= ring; dy += 1) {
-        if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue;
-        const x = baseX + dx * step;
-        const y = baseY + dy * step;
+    for (let x = baseX - ring; x <= baseX + ring; x += 1) {
+      if (x < minX || x > maxX) continue;
+
+      const topY = baseY - ring;
+      if (topY >= minY && topY <= maxY) {
         candidate.x = x;
+        candidate.y = topY;
+        if (isComponentPlacementValid(candidate, null, 2)) return { x, y: topY };
+      }
+
+      const bottomY = baseY + ring;
+      if (bottomY >= minY && bottomY <= maxY) {
+        candidate.x = x;
+        candidate.y = bottomY;
+        if (isComponentPlacementValid(candidate, null, 2)) return { x, y: bottomY };
+      }
+    }
+
+    for (let y = baseY - ring + 1; y <= baseY + ring - 1; y += 1) {
+      if (y < minY || y > maxY) continue;
+
+      const leftX = baseX - ring;
+      if (leftX >= minX && leftX <= maxX) {
+        candidate.x = leftX;
         candidate.y = y;
-        if (isComponentPlacementValid(candidate, null, 2)) {
-          return { x, y };
-        }
+        if (isComponentPlacementValid(candidate, null, 2)) return { x: leftX, y };
+      }
+
+      const rightX = baseX + ring;
+      if (rightX >= minX && rightX <= maxX) {
+        candidate.x = rightX;
+        candidate.y = y;
+        if (isComponentPlacementValid(candidate, null, 2)) return { x: rightX, y };
       }
     }
   }
@@ -1198,15 +1258,39 @@ function clearSelection() {
   updateSelectionUi();
 }
 
+function removeComponent(componentId) {
+  const index = state.components.findIndex((component) => component.id === componentId);
+  if (index < 0) return;
+
+  state.components.splice(index, 1);
+  state.wires = state.wires.filter(
+    (wire) => wire.from.componentId !== componentId && wire.to.componentId !== componentId
+  );
+
+  if (state.pendingTerminal?.componentId === componentId) {
+    state.pendingTerminal = null;
+  }
+
+  if (state.selectedComponentId === componentId) {
+    state.selectedComponentId = null;
+  }
+
+  updateSelectionUi();
+  onCircuitChanged();
+  showStatus("Componente removido");
+}
+
 function updateSelectionUi() {
   const component = getComponentById(state.selectedComponentId);
   if (!component) {
     appEls.rotateBtn.classList.add("hidden");
+    appEls.deleteBtn.classList.add("hidden");
     appEls.valueWheel.classList.add("hidden");
     return;
   }
 
   appEls.rotateBtn.classList.remove("hidden");
+  appEls.deleteBtn.classList.remove("hidden");
 
   const def = COMPONENT_DEFS[component.type];
   if (!def.editable) {
@@ -1495,13 +1579,13 @@ function runSimulation() {
     const n1 = getNodeIdx(r1);
 
     if (n0 >= 0) {
-      A[n0][row] += 1;
-      A[row][n0] += 1;
+      A[n0][row] -= 1;
+      A[row][n0] -= 1;
     }
 
     if (n1 >= 0) {
-      A[n1][row] -= 1;
-      A[row][n1] -= 1;
+      A[n1][row] += 1;
+      A[row][n1] += 1;
     }
 
     z[row] = component.value || 0;
@@ -1538,7 +1622,8 @@ function runSimulation() {
   }
 
   voltageSources.forEach((component, k) => {
-    componentCurrents.set(component.id, solution[N + k]);
+    // Align displayed arrow direction with terminal order (esquerda -> direita).
+    componentCurrents.set(component.id, -solution[N + k]);
   });
 
   const markerGroups = new Map();
@@ -1658,6 +1743,20 @@ function worldToScreen(worldX, worldY) {
   return {
     x: worldX * GRID_SIZE * state.camera.zoom + state.camera.offsetX,
     y: worldY * GRID_SIZE * state.camera.zoom + state.camera.offsetY,
+  };
+}
+
+function getVisibleWorldBounds() {
+  const w = appEls.canvas.clientWidth;
+  const h = appEls.canvas.clientHeight;
+  const topLeft = screenToWorld(0, 0);
+  const bottomRight = screenToWorld(w, h);
+
+  return {
+    minX: Math.min(topLeft.x, bottomRight.x),
+    maxX: Math.max(topLeft.x, bottomRight.x),
+    minY: Math.min(topLeft.y, bottomRight.y),
+    maxY: Math.max(topLeft.y, bottomRight.y),
   };
 }
 
@@ -1806,9 +1905,9 @@ function buildSvgForType(type) {
         <line x1="0" y1="40" x2="42" y2="40"/>
         <line x1="118" y1="40" x2="160" y2="40"/>
         <circle cx="80" cy="40" r="38"/>
-        <line x1="80" y1="20" x2="80" y2="34"/>
-        <line x1="72" y1="27" x2="88" y2="27"/>
-        <line x1="72" y1="53" x2="88" y2="53"/>
+        <line x1="56" y1="40" x2="76" y2="40"/>
+        <line x1="94" y1="30" x2="94" y2="50"/>
+        <line x1="84" y1="40" x2="104" y2="40"/>
       </g>
     </svg>`;
   }
@@ -1821,8 +1920,8 @@ function buildSvgForType(type) {
         <circle cx="80" cy="40" r="38"/>
       </g>
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="80" y1="58" x2="80" y2="22"/>
-        <polyline points="72,30 80,22 88,30"/>
+        <line x1="58" y1="40" x2="102" y2="40"/>
+        <polyline points="92,30 102,40 92,50"/>
       </g>
     </svg>`;
   }
