@@ -3,6 +3,13 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3.2;
 const IDLE_FPS = 1;
 const IDLE_FRAME_MS = 1000 / IDLE_FPS;
+const NEWTON_MAX_ITERATIONS = 40;
+const NEWTON_RESIDUAL_TOLERANCE = 1e-8;
+const NEWTON_STEP_TOLERANCE = 1e-8;
+const NEWTON_BACKTRACK_STEPS = 14;
+const NEWTON_SOURCE_STEPS = 20;
+const MAX_DIODE_EXP_ARG = 40;
+const MAX_DIODE_VOLTAGE_STEP = 0.03;
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -83,6 +90,38 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
   },
+  diode: {
+    label: "Diodo",
+    terminals: [
+      [-2, 0],
+      [2, 0],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 0.95,
+    renderW: 4,
+    renderH: 2,
+    defaultValue: 0.7,
+    editable: false,
+    unit: "V",
+    model: {
+      saturationCurrent: 1e-12,
+      idealityFactor: 1.2,
+      thermalVoltage: 0.02585,
+      gmin: 1e-9,
+    },
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 2.5, y: 1.5 },
+  },
   ground: {
     label: "Terra",
     terminals: [[0, -1]],
@@ -101,11 +140,11 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
-    footprintHalf: { x: 1.6, y: 1.6 },
+    footprintHalf: { x: 1.5, y: 1.5 },
   },
 };
 
-const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "ground"];
+const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "diode", "ground"];
 
 const state = {
   components: [],
@@ -174,6 +213,7 @@ const spriteMap = loadSprites();
 buildComponentStrip();
 setupCanvas();
 setupButtons();
+setupKeyboardShortcuts();
 setupCanvasGestures();
 setupWheelGestures();
 setupNativeZoomGuards();
@@ -242,6 +282,12 @@ function resizeCanvas() {
 function setupButtons() {
   appEls.simulateBtn.addEventListener("click", () => {
     if (!state.simulationActive) {
+      const autoGround = ensureGroundForSimulation();
+      if (!autoGround.ok) {
+        showStatus(autoGround.message || "Falha ao preparar circuito", true);
+        return;
+      }
+
       const result = runSimulation();
       if (!result.ok) {
         showStatus(result.message || "Falha na simulação", true);
@@ -284,16 +330,204 @@ function setupButtons() {
     onCircuitChanged();
   });
 
-  appEls.deleteBtn.addEventListener("click", () => {
-    if (state.selectedComponentId != null) {
-      removeComponent(state.selectedComponentId);
+  appEls.deleteBtn.addEventListener("click", handleDeleteAction);
+}
+
+function ensureGroundForSimulation() {
+  if (state.components.length === 0) {
+    return { ok: true };
+  }
+
+  if (state.components.some((component) => component.type === "ground")) {
+    return { ok: true };
+  }
+
+  const targetTerminals = collectAutoGroundTargets();
+  if (targetTerminals.length === 0) {
+    return { ok: false, message: "Nao foi possivel inserir um terra automaticamente" };
+  }
+
+  for (const target of targetTerminals) {
+    const inserted = tryInsertAutoGround(target);
+    if (inserted) {
+      showStatus("Terra inserido automaticamente");
+      requestRender(true);
+      return { ok: true, inserted: true };
+    }
+  }
+
+  return {
+    ok: false,
+    message: "Nao foi possivel inserir e conectar um terra automaticamente",
+  };
+}
+
+function collectAutoGroundTargets() {
+  const targets = [];
+  const seen = new Set();
+
+  const pushTarget = (componentId, terminalIndex) => {
+    const mapKey = terminalKey(componentId, terminalIndex);
+    if (seen.has(mapKey)) return;
+    seen.add(mapKey);
+    targets.push({ componentId, terminalIndex });
+  };
+
+  for (const component of state.components) {
+    if (component.type === "voltage_source") {
+      pushTarget(component.id, 0);
+    }
+  }
+
+  if (targets.length > 0) {
+    return targets;
+  }
+
+  for (const component of state.components) {
+    if (component.type === "current_source") {
+      pushTarget(component.id, 0);
+    }
+  }
+
+  if (targets.length > 0) {
+    return targets;
+  }
+
+  for (const component of state.components) {
+    if (component.type === "ground") continue;
+    const def = COMPONENT_DEFS[component.type];
+    for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
+      pushTarget(component.id, terminalIndex);
+    }
+  }
+
+  return targets;
+}
+
+function tryInsertAutoGround(target) {
+  const targetPosition = getTerminalPosition(target.componentId, target.terminalIndex);
+  if (!targetPosition) return false;
+
+  const groundId = state.nextComponentId;
+  const candidates = buildAutoGroundCandidates(targetPosition);
+
+  for (const candidate of candidates) {
+    const ground = {
+      id: groundId,
+      type: "ground",
+      x: candidate.x,
+      y: candidate.y,
+      rotation: candidate.rotation,
+      value: COMPONENT_DEFS.ground.defaultValue,
+    };
+
+    if (!isComponentPlacementValid(ground, null, 0)) {
+      continue;
+    }
+
+    state.components.push(ground);
+
+    const groundTerminal = getTerminalPosition(groundId, 0);
+    const route = groundTerminal ? routeWire(targetPosition, groundTerminal) : null;
+    if (!route) {
+      state.components.pop();
+      continue;
+    }
+
+    state.nextComponentId += 1;
+    state.wires.push({
+      id: state.nextWireId++,
+      from: { componentId: target.componentId, terminalIndex: target.terminalIndex },
+      to: { componentId: groundId, terminalIndex: 0 },
+      path: route,
+    });
+    return true;
+  }
+
+  return false;
+}
+
+function buildAutoGroundCandidates(targetPosition) {
+  const candidates = [];
+  const seen = new Set();
+  const visible = getVisibleWorldBounds();
+  const searchMargin = 2;
+
+  const pushCandidate = (x, y, rotation) => {
+    const keyValue = `${x},${y},${rotation}`;
+    if (seen.has(keyValue)) return;
+
+    const footprint = getFootprintHalf({ type: "ground", rotation });
+    const minX = visible.minX - searchMargin;
+    const maxX = visible.maxX + searchMargin;
+    const minY = visible.minY - searchMargin;
+    const maxY = visible.maxY + searchMargin;
+
+    if (
+      x - footprint.x < minX ||
+      x + footprint.x > maxX ||
+      y - footprint.y < minY ||
+      y + footprint.y > maxY
+    ) {
       return;
     }
 
-    if (state.selectedWireId != null) {
-      removeWire(state.selectedWireId);
+    seen.add(keyValue);
+    candidates.push({ x, y, rotation });
+  };
+
+  const maxReach = Math.max(
+    4,
+    Math.ceil(
+      Math.max(visible.maxX - visible.minX, visible.maxY - visible.minY)
+    )
+  );
+
+  for (let distance = 2; distance <= maxReach; distance += 1) {
+    pushCandidate(targetPosition.x, targetPosition.y + distance, 0);
+    pushCandidate(targetPosition.x, targetPosition.y - distance, 180);
+    pushCandidate(targetPosition.x - distance, targetPosition.y, 90);
+    pushCandidate(targetPosition.x + distance, targetPosition.y, 270);
+  }
+
+  const fallbackSpot = findEmptySpot("ground");
+  if (fallbackSpot) {
+    for (const rotation of [0, 90, 180, 270]) {
+      pushCandidate(fallbackSpot.x, fallbackSpot.y, rotation);
     }
+  }
+
+  return candidates;
+}
+
+function setupKeyboardShortcuts() {
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Delete") return;
+    if (isEditableTarget(event.target)) return;
+    if (state.selectedComponentId == null && state.selectedWireId == null) return;
+
+    event.preventDefault();
+    handleDeleteAction();
   });
+}
+
+function handleDeleteAction() {
+  if (state.selectedComponentId != null) {
+    removeComponent(state.selectedComponentId);
+    return;
+  }
+
+  if (state.selectedWireId != null) {
+    removeWire(state.selectedWireId);
+  }
+}
+
+function isEditableTarget(target) {
+  if (!target || typeof target !== "object") return false;
+  if (target.isContentEditable) return true;
+
+  const tagName = typeof target.tagName === "string" ? target.tagName.toUpperCase() : "";
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
 }
 
 function setupCanvasGestures() {
@@ -800,6 +1034,10 @@ function drawCurrentArrow(component, current) {
     const label = getValueLabelAnchor(component);
     const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
     sideSign = labelProjection >= 0 ? -1 : 1;
+    lateralOffset = 1.2;
+  }
+
+  if (component.type === "diode") {
     lateralOffset = 1.2;
   }
 
@@ -1779,6 +2017,7 @@ function runSimulation() {
   const nodeIndex = new Map(nonGroundRoots.map((root, idx) => [root, idx]));
 
   const voltageSources = activeComponents.filter((component) => component.type === "voltage_source");
+  const diodes = activeComponents.filter((component) => component.type === "diode");
 
   const N = nonGroundRoots.length;
   const M = voltageSources.length;
@@ -1789,66 +2028,47 @@ function runSimulation() {
     return { ok: false, message: "Circuito inválido para MNA" };
   }
 
-  const A = Array.from({ length: size }, () => Array(size).fill(0));
-  const z = Array(size).fill(0);
-
   const getNodeIdx = (root) => {
     if (root === groundRoot) return -1;
     return nodeIndex.get(root) ?? -1;
   };
 
-  for (const component of activeComponents) {
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
+  const linearSystem = buildLinearMnaSystem(
+    activeComponents,
+    voltageSources,
+    rootByTerminal,
+    getNodeIdx,
+    N
+  );
 
-    if (component.type === "resistor") {
-      const R = safeResistance(component.value);
-      const g = 1 / R;
+  let solution = null;
+  if (diodes.length > 0) {
+    solution = solveNonlinearCircuit({
+      baseMatrix: linearSystem.A,
+      baseVector: linearSystem.z,
+      diodes,
+      rootByTerminal,
+      getNodeIdx,
+      previousSolution: state.simulationResult?.data?.solutionVector,
+    });
 
-      if (n0 >= 0) A[n0][n0] += g;
-      if (n1 >= 0) A[n1][n1] += g;
-      if (n0 >= 0 && n1 >= 0) {
-        A[n0][n1] -= g;
-        A[n1][n0] -= g;
-      }
+    if (!solution) {
+      state.simulationResult = null;
+      return {
+        ok: false,
+        message:
+          "O solver nao convergiu para o circuito com diodos. Se houver fonte ideal diretamente no diodo, adicione resistencia limitadora.",
+      };
     }
-
-    if (component.type === "current_source") {
-      const I = component.value || 0;
-      if (n0 >= 0) z[n0] -= I;
-      if (n1 >= 0) z[n1] += I;
+  } else {
+    solution = solveLinearSystem(linearSystem.A, linearSystem.z);
+    if (!solution) {
+      state.simulationResult = null;
+      return {
+        ok: false,
+        message: "Sistema singular. Verifique se o circuito está referenciado ao terra.",
+      };
     }
-  }
-
-  voltageSources.forEach((component, k) => {
-    const row = N + k;
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
-
-    if (n0 >= 0) {
-      A[n0][row] -= 1;
-      A[row][n0] -= 1;
-    }
-
-    if (n1 >= 0) {
-      A[n1][row] += 1;
-      A[row][n1] += 1;
-    }
-
-    z[row] = component.value || 0;
-  });
-
-  const solution = solveLinearSystem(A, z);
-  if (!solution) {
-    state.simulationResult = null;
-    return {
-      ok: false,
-      message: "Sistema singular. Verifique se o circuito está referenciado ao terra.",
-    };
   }
 
   const nodeVoltageByRoot = new Map();
@@ -1869,6 +2089,8 @@ function runSimulation() {
       componentCurrents.set(component.id, (v0 - v1) / safeResistance(component.value));
     } else if (component.type === "current_source") {
       componentCurrents.set(component.id, component.value || 0);
+    } else if (component.type === "diode") {
+      componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
     }
   }
 
@@ -1911,10 +2133,285 @@ function runSimulation() {
     nodeVoltages: nodeVoltageByRoot,
     componentCurrents,
     nodeMarkers,
+    solutionVector: solution.slice(),
   };
 
   state.simulationResult = { ok: true, data };
   return { ok: true, data };
+}
+
+function buildLinearMnaSystem(activeComponents, voltageSources, rootByTerminal, getNodeIdx, nodeCount) {
+  const size = nodeCount + voltageSources.length;
+  const A = Array.from({ length: size }, () => Array(size).fill(0));
+  const z = Array(size).fill(0);
+
+  for (const component of activeComponents) {
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+
+    if (component.type === "resistor") {
+      stampConductance(A, n0, n1, 1 / safeResistance(component.value));
+    }
+
+    if (component.type === "current_source") {
+      const current = component.value || 0;
+      if (n0 >= 0) z[n0] -= current;
+      if (n1 >= 0) z[n1] += current;
+    }
+  }
+
+  voltageSources.forEach((component, index) => {
+    const row = nodeCount + index;
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+
+    if (n0 >= 0) {
+      A[n0][row] -= 1;
+      A[row][n0] -= 1;
+    }
+
+    if (n1 >= 0) {
+      A[n1][row] += 1;
+      A[row][n1] += 1;
+    }
+
+    z[row] = component.value || 0;
+  });
+
+  return { A, z };
+}
+
+function solveNonlinearCircuit({
+  baseMatrix,
+  baseVector,
+  diodes,
+  rootByTerminal,
+  getNodeIdx,
+  previousSolution,
+}) {
+  const size = baseVector.length;
+  const hasPreviousSolution = Array.isArray(previousSolution) && previousSolution.length === size;
+
+  if (hasPreviousSolution) {
+    const direct = runNewtonIterations(
+      previousSolution.slice(),
+      baseMatrix,
+      baseVector,
+      diodes,
+      rootByTerminal,
+      getNodeIdx
+    );
+    if (direct) {
+      return direct;
+    }
+  }
+
+  let vector = Array(size).fill(0);
+  for (let stepIndex = 1; stepIndex <= NEWTON_SOURCE_STEPS; stepIndex += 1) {
+    const scale = stepIndex / NEWTON_SOURCE_STEPS;
+    const scaledBaseVector = baseVector.map((value) => value * scale);
+    vector = runNewtonIterations(
+      vector,
+      baseMatrix,
+      scaledBaseVector,
+      diodes,
+      rootByTerminal,
+      getNodeIdx
+    );
+
+    if (!vector) {
+      return null;
+    }
+  }
+
+  return vector;
+}
+
+function runNewtonIterations(
+  initialVector,
+  baseMatrix,
+  baseVector,
+  diodes,
+  rootByTerminal,
+  getNodeIdx
+) {
+  let vector = initialVector.slice();
+
+  for (let iteration = 0; iteration < NEWTON_MAX_ITERATIONS; iteration += 1) {
+    const { residual, jacobian } = evaluateNonlinearSystem(
+      vector,
+      baseMatrix,
+      baseVector,
+      diodes,
+      rootByTerminal,
+      getNodeIdx
+    );
+    const residualNorm = maxAbsValue(residual);
+    if (residualNorm <= NEWTON_RESIDUAL_TOLERANCE) {
+      return vector;
+    }
+
+    const step = solveLinearSystem(jacobian, residual.map((value) => -value));
+    if (!step) {
+      return null;
+    }
+
+    const stepNorm = maxAbsValue(step);
+    if (stepNorm <= NEWTON_STEP_TOLERANCE) {
+      return residualNorm <= NEWTON_RESIDUAL_TOLERANCE * 10 ? vector : null;
+    }
+
+    let damping = 1;
+    let nextVector = null;
+    let nextResidualNorm = Infinity;
+
+    for (let attempt = 0; attempt < NEWTON_BACKTRACK_STEPS; attempt += 1) {
+      const candidate = limitCandidateDiodeVoltages(
+        vector.map((value, index) => value + step[index] * damping),
+        vector,
+        diodes,
+        rootByTerminal,
+        getNodeIdx
+      );
+      const candidateResidualNorm = evaluateResidualNorm(
+        candidate,
+        baseMatrix,
+        baseVector,
+        diodes,
+        rootByTerminal,
+        getNodeIdx
+      );
+
+      if (candidateResidualNorm < residualNorm) {
+        nextVector = candidate;
+        nextResidualNorm = candidateResidualNorm;
+        break;
+      }
+
+      if (candidateResidualNorm < nextResidualNorm) {
+        nextVector = candidate;
+        nextResidualNorm = candidateResidualNorm;
+      }
+
+      damping *= 0.5;
+    }
+
+    if (!nextVector || nextResidualNorm === Infinity) {
+      return null;
+    }
+
+    vector = nextVector;
+
+    if (nextResidualNorm <= NEWTON_RESIDUAL_TOLERANCE && stepNorm * damping <= NEWTON_STEP_TOLERANCE) {
+      return vector;
+    }
+  }
+
+  return null;
+}
+
+function evaluateNonlinearSystem(
+  vector,
+  baseMatrix,
+  baseVector,
+  diodes,
+  rootByTerminal,
+  getNodeIdx
+) {
+  const residual = multiplyMatrixVector(baseMatrix, vector).map(
+    (value, index) => value - baseVector[index]
+  );
+  const jacobian = baseMatrix.map((row) => row.slice());
+
+  for (const component of diodes) {
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+    const v0 = n0 >= 0 ? vector[n0] : 0;
+    const v1 = n1 >= 0 ? vector[n1] : 0;
+    const { current, conductance } = evaluateDiodeModel(component, v0 - v1);
+
+    if (n0 >= 0) {
+      residual[n0] += current;
+      jacobian[n0][n0] += conductance;
+    }
+
+    if (n1 >= 0) {
+      residual[n1] -= current;
+      jacobian[n1][n1] += conductance;
+    }
+
+    if (n0 >= 0 && n1 >= 0) {
+      jacobian[n0][n1] -= conductance;
+      jacobian[n1][n0] -= conductance;
+    }
+  }
+
+  return { residual, jacobian };
+}
+
+function evaluateResidualNorm(vector, baseMatrix, baseVector, diodes, rootByTerminal, getNodeIdx) {
+  const { residual } = evaluateNonlinearSystem(
+    vector,
+    baseMatrix,
+    baseVector,
+    diodes,
+    rootByTerminal,
+    getNodeIdx
+  );
+  return maxAbsValue(residual);
+}
+
+function stampConductance(matrix, n0, n1, conductance) {
+  if (n0 >= 0) matrix[n0][n0] += conductance;
+  if (n1 >= 0) matrix[n1][n1] += conductance;
+  if (n0 >= 0 && n1 >= 0) {
+    matrix[n0][n1] -= conductance;
+    matrix[n1][n0] -= conductance;
+  }
+}
+
+function limitCandidateDiodeVoltages(candidate, previousVector, diodes, rootByTerminal, getNodeIdx) {
+  if (!diodes.length) return candidate;
+
+  const limited = candidate.slice();
+
+  for (const component of diodes) {
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+    const previousDrop = getBranchVoltage(previousVector, n0, n1);
+    const nextDrop = getBranchVoltage(limited, n0, n1);
+    const maxDrop = previousDrop + MAX_DIODE_VOLTAGE_STEP;
+    const minDrop = previousDrop - MAX_DIODE_VOLTAGE_STEP;
+    const boundedDrop = clamp(nextDrop, minDrop, maxDrop);
+    const correction = boundedDrop - nextDrop;
+
+    if (Math.abs(correction) < 1e-12) continue;
+
+    if (n0 >= 0 && n1 >= 0) {
+      limited[n0] += correction * 0.5;
+      limited[n1] -= correction * 0.5;
+    } else if (n0 >= 0) {
+      limited[n0] += correction;
+    } else if (n1 >= 0) {
+      limited[n1] -= correction;
+    }
+  }
+
+  return limited;
+}
+
+function getBranchVoltage(vector, n0, n1) {
+  const v0 = n0 >= 0 ? vector[n0] : 0;
+  const v1 = n1 >= 0 ? vector[n1] : 0;
+  return v0 - v1;
 }
 
 function solveLinearSystem(matrix, vector) {
@@ -2096,6 +2593,23 @@ function safeResistance(value) {
   return Math.max(1e-9, value);
 }
 
+function evaluateDiodeModel(component, voltage) {
+  const def = COMPONENT_DEFS[component?.type];
+  const model = def?.model || {};
+  const saturationCurrent = model.saturationCurrent ?? 1e-12;
+  const idealityFactor = model.idealityFactor ?? 1;
+  const thermalVoltage = model.thermalVoltage ?? 0.02585;
+  const gmin = model.gmin ?? 0;
+  const thermalFactor = Math.max(1e-9, idealityFactor * thermalVoltage);
+  const expArg = clamp(voltage / thermalFactor, -60, MAX_DIODE_EXP_ARG);
+  const expTerm = Math.exp(expArg);
+
+  return {
+    current: saturationCurrent * (expTerm - 1) + gmin * voltage,
+    conductance: (saturationCurrent / thermalFactor) * expTerm + gmin,
+  };
+}
+
 function normalizeRotation(rotation) {
   return ((rotation % 360) + 360) % 360;
 }
@@ -2136,6 +2650,24 @@ function formatComponentValue(component) {
     return formatCurrent(component.value);
   }
   return "";
+}
+
+function multiplyMatrixVector(matrix, vector) {
+  return matrix.map((row) => {
+    let sum = 0;
+    for (let i = 0; i < row.length; i += 1) {
+      sum += row[i] * vector[i];
+    }
+    return sum;
+  });
+}
+
+function maxAbsValue(values) {
+  let max = 0;
+  for (const value of values) {
+    max = Math.max(max, Math.abs(value));
+  }
+  return max;
 }
 
 function formatResistance(value) {
@@ -2209,6 +2741,17 @@ function buildSvgForType(type) {
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
         <line x1="58" y1="40" x2="102" y2="40"/>
         <polyline points="92,30 102,40 92,50"/>
+      </g>
+    </svg>`;
+  }
+
+  if (type === "diode") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="0" y1="40" x2="42" y2="40" fill="none"/>
+        <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
+        <polygon points="42,16 42,64 100,40" fill="#e2e8f0"/>
+        <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
       </g>
     </svg>`;
   }
