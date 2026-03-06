@@ -650,22 +650,29 @@ function setupCanvasGestures() {
     }
 
     clearSelection();
+    startMousePan(event);
   });
 
   window.addEventListener("mousemove", (event) => {
-    if (state.pointer.mode !== "mouse-drag") return;
-    const component = getComponentById(state.pointer.dragComponentId);
-    if (!component) return;
+    if (state.pointer.mode === "mouse-drag") {
+      const component = getComponentById(state.pointer.dragComponentId);
+      if (!component) return;
 
-    const point = clientToWorld(event.clientX, event.clientY);
-    const targetX = Math.round(point.x - state.pointer.dragOffsetX);
-    const targetY = Math.round(point.y - state.pointer.dragOffsetY);
-    if (targetX === component.x && targetY === component.y) return;
-    tryMoveComponent(component.id, targetX, targetY);
+      const point = clientToWorld(event.clientX, event.clientY);
+      const targetX = Math.round(point.x - state.pointer.dragOffsetX);
+      const targetY = Math.round(point.y - state.pointer.dragOffsetY);
+      if (targetX === component.x && targetY === component.y) return;
+      tryMoveComponent(component.id, targetX, targetY);
+      return;
+    }
+
+    if (state.pointer.mode === "mouse-pan") {
+      moveMousePan(event);
+    }
   });
 
   window.addEventListener("mouseup", () => {
-    if (state.pointer.mode === "mouse-drag") {
+    if (state.pointer.mode === "mouse-drag" || state.pointer.mode === "mouse-pan") {
       state.pointer.mode = "none";
       state.pointer.dragComponentId = null;
     }
@@ -1153,6 +1160,23 @@ function startPan(touch) {
 
 function movePan(touch) {
   const point = clientToCanvas(touch.clientX, touch.clientY);
+  state.camera.offsetX = state.pointer.initialOffsetX + (point.x - state.pointer.initialMidX);
+  state.camera.offsetY = state.pointer.initialOffsetY + (point.y - state.pointer.initialMidY);
+  requestRender();
+}
+
+function startMousePan(event) {
+  const point = clientToCanvas(event.clientX, event.clientY);
+  state.pointer.mode = "mouse-pan";
+  state.pointer.initialMidX = point.x;
+  state.pointer.initialMidY = point.y;
+  state.pointer.initialOffsetX = state.camera.offsetX;
+  state.pointer.initialOffsetY = state.camera.offsetY;
+  requestRender(true);
+}
+
+function moveMousePan(event) {
+  const point = clientToCanvas(event.clientX, event.clientY);
   state.camera.offsetX = state.pointer.initialOffsetX + (point.x - state.pointer.initialMidX);
   state.camera.offsetY = state.pointer.initialOffsetY + (point.y - state.pointer.initialMidY);
   requestRender();
