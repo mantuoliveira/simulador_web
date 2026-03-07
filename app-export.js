@@ -2,22 +2,25 @@ const EXPORT_FILENAME_PREFIX = "circuito";
 const EXPORT_TRIM_PADDING_PX = 12;
 const EXPORT_SCALE = 3;
 
-async function handleExportAction() {
+async function handleExportAction({ background = "white" } = {}) {
   if (state.components.length === 0) {
     showStatus("Adicione um componente para exportar", true);
     return;
   }
 
   try {
-    const blob = await exportCircuitBlob();
+    const blob = await exportCircuitBlob({ background });
     const fileName = buildExportFileName();
+    const successMessage =
+      background === "transparent" ? "PNG transparente pronto para compartilhar" : "PNG pronto para compartilhar";
+    const downloadMessage = background === "transparent" ? "PNG transparente exportado" : "PNG exportado";
     if (await tryShareExport(blob, fileName)) {
-      showStatus("PNG pronto para compartilhar");
+      showStatus(successMessage);
       return;
     }
 
     downloadBlob(blob, fileName);
-    showStatus("PNG exportado");
+    showStatus(downloadMessage);
   } catch (error) {
     if (error?.name === "AbortError") {
       return;
@@ -26,7 +29,7 @@ async function handleExportAction() {
   }
 }
 
-async function exportCircuitBlob() {
+async function exportCircuitBlob({ background = "white" } = {}) {
   const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
   const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
   const exportDpr = Math.max(1, EXPORT_SCALE);
@@ -49,7 +52,9 @@ async function exportCircuitBlob() {
   );
 
   const trimmedCanvas = trimCanvas(exportCanvas, Math.ceil(exportDpr * EXPORT_TRIM_PADDING_PX));
-  return canvasToBlob(trimmedCanvas, "image/png");
+  const finalCanvas =
+    background === "white" ? applyCanvasBackground(trimmedCanvas, "#ffffff") : trimmedCanvas;
+  return canvasToBlob(finalCanvas, "image/png");
 }
 
 function canvasToBlob(canvas, type) {
@@ -112,6 +117,22 @@ function buildExportFileName() {
   const minutes = String(now.getMinutes()).padStart(2, "0");
   const seconds = String(now.getSeconds()).padStart(2, "0");
   return `${EXPORT_FILENAME_PREFIX}-${year}${month}${day}-${hours}${minutes}${seconds}.png`;
+}
+
+function applyCanvasBackground(sourceCanvas, fillStyle) {
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = sourceCanvas.width;
+  outputCanvas.height = sourceCanvas.height;
+
+  const outputCtx = outputCanvas.getContext("2d");
+  if (!outputCtx) {
+    return sourceCanvas;
+  }
+
+  outputCtx.fillStyle = fillStyle;
+  outputCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+  outputCtx.drawImage(sourceCanvas, 0, 0);
+  return outputCanvas;
 }
 
 function trimCanvas(sourceCanvas, paddingPx = 0) {

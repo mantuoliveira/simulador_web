@@ -37,7 +37,8 @@ const TOUCH_TERMINAL_HIT_RADIUS = 0.78;
 const DOUBLE_TAP_MAX_DELAY_MS = 320;
 const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
 const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
-const DELETE_BUTTON_HOLD_MS = 2000;
+const DELETE_BUTTON_HOLD_MS = 1000;
+const EXPORT_BUTTON_HOLD_MS = 1000;
 const SIMULATION_BUTTON_ICONS = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10-6.5z"/></svg>',
   running:
@@ -494,9 +495,12 @@ const state = {
   nextSplitGroupId: 1,
   selectedComponentId: null,
   selectedWireId: null,
+  selectedNodeMarkerRoot: null,
+  selectedNodeMarkerTerminal: null,
   pendingTerminal: null,
   simulationActive: false,
   simulationResult: null,
+  hiddenNodeMarkerRoots: new Set(),
   camera: {
     offsetX: 0,
     offsetY: 0,
@@ -554,6 +558,8 @@ const renderState = {
 const wheelState = {
   dragging: false,
   pointerId: null,
+  lastRawNormalized: null,
+  activeNormalized: null,
 };
 
 const emptyCanvasTapState = {
@@ -563,6 +569,11 @@ const emptyCanvasTapState = {
 };
 
 const deleteButtonHoldState = {
+  timerId: null,
+  suppressNextClick: false,
+};
+
+const exportButtonHoldState = {
   timerId: null,
   suppressNextClick: false,
 };
@@ -732,14 +743,16 @@ function setupButtons() {
 
     state.simulationActive = false;
     state.simulationResult = null;
+    state.hiddenNodeMarkerRoots.clear();
+    state.selectedNodeMarkerRoot = null;
+    state.selectedNodeMarkerTerminal = null;
     setSimulationButtonState(false);
     updateSelectionUi();
     showStatus("Simulação pausada");
   });
 
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
-  appEls.exportBtn.addEventListener("click", handleExportAction);
-  appEls.currentArrowBtn.addEventListener("click", toggleSelectedComponentCurrentArrow);
+  appEls.currentArrowBtn.addEventListener("click", toggleSelectedAnnotationVisibility);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const result = rotateComponentInCircuit(state, state.selectedComponentId);
@@ -754,6 +767,7 @@ function setupButtons() {
     }
   });
 
+  setupExportButtonGestures();
   setupDeleteButtonGestures();
 }
 
@@ -765,9 +779,12 @@ function clearCircuit() {
   state.nextSplitGroupId = 1;
   state.selectedComponentId = null;
   state.selectedWireId = null;
+  state.selectedNodeMarkerRoot = null;
+  state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
   state.simulationActive = false;
   state.simulationResult = null;
+  state.hiddenNodeMarkerRoots.clear();
 
   setSimulationButtonState(false);
   updateSelectionUi();
@@ -787,23 +804,50 @@ function canToggleCurrentArrow(component) {
   return !!component && isSimulatedBranchComponent(component.type) && component.type !== "ground";
 }
 
-function setCurrentArrowButtonState(component) {
-  const isHidden = component?.currentArrowHidden === true;
-  const label = isHidden ? "Mostrar seta de corrente" : "Ocultar seta de corrente";
-  appEls.currentArrowBtn.innerHTML = isHidden
+function canToggleNodeMarkerVoltage(nodeMarker) {
+  return !!nodeMarker && state.simulationActive && state.simulationResult?.ok;
+}
+
+function setVisibilityToggleButtonState({ mode, hidden }) {
+  const label =
+    mode === "node"
+      ? hidden
+        ? "Mostrar tensão do nó"
+        : "Ocultar tensão do nó"
+      : hidden
+        ? "Mostrar seta de corrente"
+        : "Ocultar seta de corrente";
+  appEls.currentArrowBtn.innerHTML = hidden
     ? CURRENT_ARROW_BUTTON_ICONS.hidden
     : CURRENT_ARROW_BUTTON_ICONS.visible;
   appEls.currentArrowBtn.title = label;
   appEls.currentArrowBtn.setAttribute("aria-label", label);
-  appEls.currentArrowBtn.setAttribute("aria-pressed", isHidden ? "true" : "false");
+  appEls.currentArrowBtn.setAttribute("aria-pressed", hidden ? "true" : "false");
 }
 
-function toggleSelectedComponentCurrentArrow() {
+function toggleSelectedAnnotationVisibility() {
+  const nodeMarker = getSelectedNodeMarker();
+  if (canToggleNodeMarkerVoltage(nodeMarker)) {
+    if (state.hiddenNodeMarkerRoots.has(nodeMarker.root)) {
+      state.hiddenNodeMarkerRoots.delete(nodeMarker.root);
+      setVisibilityToggleButtonState({ mode: "node", hidden: false });
+      requestRender(true);
+      showStatus("Tensão do nó visível");
+      return;
+    }
+
+    state.hiddenNodeMarkerRoots.add(nodeMarker.root);
+    setVisibilityToggleButtonState({ mode: "node", hidden: true });
+    requestRender(true);
+    showStatus("Tensão do nó oculta");
+    return;
+  }
+
   const component = getComponentById(state.selectedComponentId);
   if (!canToggleCurrentArrow(component)) return;
 
   component.currentArrowHidden = component.currentArrowHidden !== true;
-  setCurrentArrowButtonState(component);
+  setVisibilityToggleButtonState({ mode: "component", hidden: component.currentArrowHidden === true });
   requestRender(true);
   showStatus(component.currentArrowHidden ? "Seta de corrente oculta" : "Seta de corrente visível");
 }
@@ -842,6 +886,42 @@ function clearDeleteButtonHold() {
 
   clearTimeout(deleteButtonHoldState.timerId);
   deleteButtonHoldState.timerId = null;
+}
+
+function setupExportButtonGestures() {
+  appEls.exportBtn.addEventListener("click", (event) => {
+    if (exportButtonHoldState.suppressNextClick) {
+      exportButtonHoldState.suppressNextClick = false;
+      event.preventDefault();
+      return;
+    }
+
+    void handleExportAction({ background: "white" });
+  });
+
+  appEls.exportBtn.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (state.components.length === 0) return;
+
+    clearExportButtonHold();
+    exportButtonHoldState.suppressNextClick = false;
+    exportButtonHoldState.timerId = setTimeout(() => {
+      exportButtonHoldState.timerId = null;
+      exportButtonHoldState.suppressNextClick = true;
+      void handleExportAction({ background: "transparent" });
+    }, EXPORT_BUTTON_HOLD_MS);
+  });
+
+  appEls.exportBtn.addEventListener("pointerup", clearExportButtonHold);
+  appEls.exportBtn.addEventListener("pointerleave", clearExportButtonHold);
+  appEls.exportBtn.addEventListener("pointercancel", clearExportButtonHold);
+}
+
+function clearExportButtonHold() {
+  if (exportButtonHoldState.timerId == null) return;
+
+  clearTimeout(exportButtonHoldState.timerId);
+  exportButtonHoldState.timerId = null;
 }
 
 function toggleSelectedComponentTerminalOrder() {
@@ -1173,6 +1253,14 @@ function setupCanvasGestures() {
 
   appEls.canvas.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
+    const canvasPoint = clientToCanvas(event.clientX, event.clientY);
+    const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
+    if (nodeMarkerHit) {
+      clearEmptyCanvasTapHistory();
+      selectNodeMarker(nodeMarkerHit.root);
+      return;
+    }
+
     const point = clientToWorld(event.clientX, event.clientY);
     const terminalHit = pickTerminal(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS);
     if (terminalHit) {
@@ -1210,6 +1298,11 @@ function setupCanvasGestures() {
     (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
+
+      const canvasPoint = clientToCanvas(event.clientX, event.clientY);
+      if (pickNodeMarker(canvasPoint.x, canvasPoint.y)) {
+        return;
+      }
 
       const worldPoint = clientToWorld(event.clientX, event.clientY);
       if (!isCanvasPointEmpty(worldPoint.x, worldPoint.y, MOUSE_TERMINAL_HIT_RADIUS)) {
@@ -1271,6 +1364,8 @@ function setupWheelGestures() {
 
     wheelState.dragging = true;
     wheelState.pointerId = event.pointerId;
+    wheelState.lastRawNormalized = null;
+    wheelState.activeNormalized = normalizedFromValue(component);
     appEls.valueWheel.setPointerCapture(event.pointerId);
     updateValueFromWheelPointer(event.clientX, event.clientY);
   });
@@ -1284,6 +1379,8 @@ function setupWheelGestures() {
     if (wheelState.pointerId !== event.pointerId) return;
     wheelState.dragging = false;
     wheelState.pointerId = null;
+    wheelState.lastRawNormalized = null;
+    wheelState.activeNormalized = null;
     try {
       appEls.valueWheel.releasePointerCapture(event.pointerId);
     } catch (_) {}
@@ -1292,6 +1389,8 @@ function setupWheelGestures() {
   appEls.valueWheel.addEventListener("pointercancel", () => {
     wheelState.dragging = false;
     wheelState.pointerId = null;
+    wheelState.lastRawNormalized = null;
+    wheelState.activeNormalized = null;
   });
 }
 
@@ -1548,12 +1647,23 @@ function drawComponents(renderTarget, showSelection = true) {
         state.pendingTerminal &&
         state.pendingTerminal.componentId === component.id &&
         state.pendingTerminal.terminalIndex === i;
+      const isNodeMarkerTerminalSelected =
+        showSelection &&
+        state.selectedNodeMarkerTerminal &&
+        state.selectedNodeMarkerTerminal.componentId === component.id &&
+        state.selectedNodeMarkerTerminal.terminalIndex === i;
       const radius = getTerminalRenderRadius(component.type);
 
       context.beginPath();
       context.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
       context.fillStyle =
-        component.type === "junction" ? "#0f172a" : isPending ? "#f59e0b" : connected ? "#0f172a" : "#f8fafc";
+        component.type === "junction"
+          ? "#0f172a"
+          : isPending || isNodeMarkerTerminalSelected
+            ? "#f59e0b"
+            : connected
+              ? "#0f172a"
+              : "#f8fafc";
       context.fill();
       context.lineWidth = 1.5;
       context.strokeStyle = component.type === "junction" || connected ? "#0f172a" : "#334155";
@@ -1658,24 +1768,24 @@ function drawSimulationAnnotations(renderTarget, data) {
   if (!data) return;
 
   for (const marker of data.nodeMarkers) {
-    const sp = worldToScreen(marker.x, marker.y);
-    const label = `${formatVoltage(marker.voltage)}`;
-
-    context.font = '12px "Avenir Next", sans-serif';
-    const textW = context.measureText(label).width;
-    const padX = 7;
-    const boxW = textW + padX * 2;
-    const boxH = 20;
-    const placement = getNodeMarkerPlacement(sp, boxW, boxH, marker.labelDirection);
+    if (state.hiddenNodeMarkerRoots.has(marker.root)) continue;
+    const metrics = getNodeMarkerRenderMetrics(renderTarget, marker);
 
     context.fillStyle = "rgba(15, 23, 42, 0.86)";
-    roundedRect(context, placement.boxX, placement.boxY, boxW, boxH, 8);
+    roundedRect(context, metrics.boxX, metrics.boxY, metrics.boxW, metrics.boxH, 8);
     context.fill();
+
+    if (state.selectedNodeMarkerRoot === marker.root) {
+      context.lineWidth = 2;
+      context.strokeStyle = "#0ea5a8";
+      roundedRect(context, metrics.boxX, metrics.boxY, metrics.boxW, metrics.boxH, 8);
+      context.stroke();
+    }
 
     context.fillStyle = "#f8fafc";
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(label, placement.textX, placement.textY);
+    context.fillText(metrics.label, metrics.textX, metrics.textY);
   }
 
   for (const component of state.components) {
@@ -1687,6 +1797,29 @@ function drawSimulationAnnotations(renderTarget, data) {
 
 function getCurrentArrowTerminalPair(component) {
   return getComponentBehavior(component.type).getCurrentArrowTerminalPair(component);
+}
+
+function getNodeMarkerRenderMetrics(renderTarget, marker) {
+  const { context } = renderTarget;
+  const sp = worldToScreen(marker.x, marker.y);
+  const label = `${formatVoltage(marker.voltage)}`;
+
+  context.font = '12px "Avenir Next", sans-serif';
+  const textW = context.measureText(label).width;
+  const padX = 7;
+  const boxW = textW + padX * 2;
+  const boxH = 20;
+  const placement = getNodeMarkerPlacement(sp, boxW, boxH, marker.labelDirection);
+
+  return {
+    label,
+    boxW,
+    boxH,
+    boxX: placement.boxX,
+    boxY: placement.boxY,
+    textX: placement.textX,
+    textY: placement.textY,
+  };
 }
 
 function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") {
@@ -1844,6 +1977,15 @@ function drawCurrentArrow(renderTarget, component, current) {
 }
 
 function startSingleTouch(touch) {
+  const canvasPoint = clientToCanvas(touch.clientX, touch.clientY);
+  const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
+  if (nodeMarkerHit) {
+    clearEmptyCanvasTapHistory();
+    selectNodeMarker(nodeMarkerHit.root);
+    state.pointer.mode = "none";
+    return;
+  }
+
   const point = clientToWorld(touch.clientX, touch.clientY);
 
   const terminalHit = pickTerminal(point.x, point.y, TOUCH_TERMINAL_HIT_RADIUS);
@@ -2050,8 +2192,14 @@ function findTouchById(touchList, id) {
 }
 
 function handleTerminalTap(componentId, terminalIndex) {
-  if (state.selectedWireId != null) {
+  if (trySelectNodeMarkerFromTerminal(componentId, terminalIndex)) {
+    return;
+  }
+
+  if (state.selectedWireId != null || state.selectedNodeMarkerRoot != null) {
     state.selectedWireId = null;
+    state.selectedNodeMarkerRoot = null;
+    state.selectedNodeMarkerTerminal = null;
     updateSelectionUi();
   }
 
@@ -2138,8 +2286,10 @@ function handleWireTap(wireHit) {
     return;
   }
 
-  if (state.selectedWireId != null) {
+  if (state.selectedWireId != null || state.selectedNodeMarkerRoot != null) {
     state.selectedWireId = null;
+    state.selectedNodeMarkerRoot = null;
+    state.selectedNodeMarkerTerminal = null;
     updateSelectionUi();
   }
 
@@ -2898,6 +3048,28 @@ function pickWire(worldX, worldY) {
   return null;
 }
 
+function pickNodeMarker(screenX, screenY, renderTarget = mainRenderTarget) {
+  if (!state.simulationActive || !state.simulationResult?.ok) return null;
+
+  const hitPadding = 6;
+  for (let i = state.simulationResult.data.nodeMarkers.length - 1; i >= 0; i -= 1) {
+    const marker = state.simulationResult.data.nodeMarkers[i];
+    if (state.hiddenNodeMarkerRoots.has(marker.root)) continue;
+
+    const metrics = getNodeMarkerRenderMetrics(renderTarget, marker);
+    if (
+      screenX >= metrics.boxX - hitPadding &&
+      screenX <= metrics.boxX + metrics.boxW + hitPadding &&
+      screenY >= metrics.boxY - hitPadding &&
+      screenY <= metrics.boxY + metrics.boxH + hitPadding
+    ) {
+      return marker;
+    }
+  }
+
+  return null;
+}
+
 function snapPointToSegment(worldX, worldY, start, end) {
   if (start.x === end.x) {
     return {
@@ -2957,6 +3129,8 @@ function worldToLocal(component, worldX, worldY) {
 function selectComponent(componentId) {
   state.selectedComponentId = componentId;
   state.selectedWireId = null;
+  state.selectedNodeMarkerRoot = null;
+  state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
@@ -2964,6 +3138,17 @@ function selectComponent(componentId) {
 function selectWire(wireId) {
   state.selectedWireId = wireId;
   state.selectedComponentId = null;
+  state.selectedNodeMarkerRoot = null;
+  state.selectedNodeMarkerTerminal = null;
+  state.pendingTerminal = null;
+  updateSelectionUi();
+}
+
+function selectNodeMarker(root, terminalRef = null) {
+  state.selectedNodeMarkerRoot = root;
+  state.selectedNodeMarkerTerminal = terminalRef ? cloneTerminalRef(terminalRef) : null;
+  state.selectedComponentId = null;
+  state.selectedWireId = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
@@ -2971,6 +3156,8 @@ function selectWire(wireId) {
 function clearSelection() {
   state.selectedComponentId = null;
   state.selectedWireId = null;
+  state.selectedNodeMarkerRoot = null;
+  state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
@@ -3198,6 +3385,47 @@ function clearInvalidSelectionsInCircuit(circuit) {
     changed = true;
   }
 
+  if (circuit.selectedNodeMarkerRoot != null) {
+    const nodeMarkers = circuit.simulationResult?.ok ? circuit.simulationResult.data.nodeMarkers : null;
+    if (!nodeMarkers?.some((marker) => marker.root === circuit.selectedNodeMarkerRoot)) {
+      circuit.selectedNodeMarkerRoot = null;
+      circuit.selectedNodeMarkerTerminal = null;
+      changed = true;
+    }
+  }
+
+  if (circuit.selectedNodeMarkerRoot == null && circuit.selectedNodeMarkerTerminal != null) {
+    circuit.selectedNodeMarkerTerminal = null;
+    changed = true;
+  }
+
+  if (circuit.selectedNodeMarkerTerminal != null) {
+    const selectedTerminalComponent = getComponentByIdFromCollection(
+      circuit.components,
+      circuit.selectedNodeMarkerTerminal.componentId
+    );
+    const selectedTerminalDef = selectedTerminalComponent
+      ? COMPONENT_DEFS[selectedTerminalComponent.type]
+      : null;
+    if (
+      !selectedTerminalComponent ||
+      !selectedTerminalDef ||
+      !selectedTerminalDef.terminals[circuit.selectedNodeMarkerTerminal.terminalIndex]
+    ) {
+      circuit.selectedNodeMarkerTerminal = null;
+      changed = true;
+    }
+  }
+
+  if (circuit.hiddenNodeMarkerRoots instanceof Set && circuit.simulationResult?.ok) {
+    const validRoots = new Set(circuit.simulationResult.data.nodeMarkers.map((marker) => marker.root));
+    for (const root of [...circuit.hiddenNodeMarkerRoots]) {
+      if (validRoots.has(root)) continue;
+      circuit.hiddenNodeMarkerRoots.delete(root);
+      changed = true;
+    }
+  }
+
   if (!circuit.pendingTerminal) {
     return changed;
   }
@@ -3248,14 +3476,53 @@ function getReachabilityTerminalPairs(component) {
   return getComponentBehavior(component.type).getReachabilityTerminalPairs(component);
 }
 
+function getSelectedNodeMarker() {
+  if (state.selectedNodeMarkerRoot == null || !state.simulationResult?.ok) {
+    return null;
+  }
+
+  return (
+    state.simulationResult.data.nodeMarkers.find((marker) => marker.root === state.selectedNodeMarkerRoot) || null
+  );
+}
+
+function getNodeMarkerRootForTerminal(componentId, terminalIndex) {
+  if (!state.simulationActive || !state.simulationResult?.ok) {
+    return null;
+  }
+
+  const root = state.simulationResult.data.rootByTerminal?.get(terminalKey(componentId, terminalIndex)) ?? null;
+  if (root == null) {
+    return null;
+  }
+
+  return state.simulationResult.data.nodeMarkers.some((marker) => marker.root === root) ? root : null;
+}
+
+function trySelectNodeMarkerFromTerminal(componentId, terminalIndex) {
+  if (state.pendingTerminal) {
+    return false;
+  }
+
+  const root = getNodeMarkerRootForTerminal(componentId, terminalIndex);
+  if (root == null) {
+    return false;
+  }
+
+  selectNodeMarker(root, { componentId, terminalIndex });
+  return true;
+}
+
 function updateSelectionUi() {
   requestRender(true);
+  clearInvalidSelectionsInCircuit(state);
 
   const component = getComponentById(state.selectedComponentId);
   const wire = getWireById(state.selectedWireId);
+  const nodeMarker = getSelectedNodeMarker();
   const canExport = state.components.length > 0;
 
-  if (!component && !wire) {
+  if (!component && !wire && !nodeMarker) {
     clearDeleteButtonHold();
     deleteButtonHoldState.suppressNextClick = false;
     appEls.exportBtn.classList.toggle("hidden", !canExport);
@@ -3268,6 +3535,25 @@ function updateSelectionUi() {
   }
 
   appEls.exportBtn.classList.add("hidden");
+
+  if (nodeMarker) {
+    appEls.deleteBtn.classList.add("hidden");
+    appEls.rotateBtn.classList.add("hidden");
+    appEls.swapOpAmpBtn.classList.add("hidden");
+    appEls.valueWheel.classList.add("hidden");
+
+    if (canToggleNodeMarkerVoltage(nodeMarker)) {
+      setVisibilityToggleButtonState({
+        mode: "node",
+        hidden: state.hiddenNodeMarkerRoots.has(nodeMarker.root),
+      });
+      appEls.currentArrowBtn.classList.remove("hidden");
+    } else {
+      appEls.currentArrowBtn.classList.add("hidden");
+    }
+    return;
+  }
+
   appEls.deleteBtn.classList.remove("hidden");
 
   if (!component) {
@@ -3279,7 +3565,10 @@ function updateSelectionUi() {
   }
 
   if (state.simulationActive && canToggleCurrentArrow(component)) {
-    setCurrentArrowButtonState(component);
+    setVisibilityToggleButtonState({
+      mode: "component",
+      hidden: component.currentArrowHidden === true,
+    });
     appEls.currentArrowBtn.classList.remove("hidden");
   } else {
     appEls.currentArrowBtn.classList.add("hidden");
@@ -3319,18 +3608,42 @@ function updateValueFromWheelPointer(clientX, clientY) {
   const component = getComponentById(state.selectedComponentId);
   if (!component) return;
 
-  const rect = appEls.valueWheel.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
+  const rawNormalized = getWheelNormalizedAtClientPoint(clientX, clientY);
+  let normalized = rawNormalized;
 
-  const angle = Math.atan2(clientY - cy, clientX - cx);
-  let normalized = (angle + Math.PI / 2) / (Math.PI * 2);
-  normalized = ((normalized % 1) + 1) % 1;
+  if (wheelState.dragging) {
+    if (wheelState.lastRawNormalized == null || wheelState.activeNormalized == null) {
+      wheelState.lastRawNormalized = rawNormalized;
+      wheelState.activeNormalized = rawNormalized;
+    } else {
+      let delta = rawNormalized - wheelState.lastRawNormalized;
+      if (delta > 0.5) {
+        delta -= 1;
+      } else if (delta < -0.5) {
+        delta += 1;
+      }
+
+      wheelState.activeNormalized = clamp(wheelState.activeNormalized + delta, 0, 1);
+      wheelState.lastRawNormalized = rawNormalized;
+    }
+
+    normalized = wheelState.activeNormalized;
+  }
 
   const value = valueFromNormalized(component.type, normalized);
   component.value = value;
   syncWheelWithSelectedComponent();
   onCircuitChanged();
+}
+
+function getWheelNormalizedAtClientPoint(clientX, clientY) {
+  const rect = appEls.valueWheel.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const angle = Math.atan2(clientY - cy, clientX - cx);
+  let normalized = (angle + Math.PI / 2) / (Math.PI * 2);
+  normalized = ((normalized % 1) + 1) % 1;
+  return normalized;
 }
 
 function valueFromNormalized(type, normalized) {
@@ -3498,11 +3811,15 @@ function getValueLabelAnchor(component) {
 }
 
 function onCircuitChanged() {
+  const shouldRefreshSelectionUi = state.selectedNodeMarkerRoot != null;
   if (state.simulationActive) {
     const result = runSimulation();
     if (!result.ok) {
       state.simulationActive = false;
       state.simulationResult = null;
+      state.hiddenNodeMarkerRoots.clear();
+      state.selectedNodeMarkerRoot = null;
+      state.selectedNodeMarkerTerminal = null;
       setSimulationButtonState(false);
       updateSelectionUi();
       showStatus(result.message || "Erro na simulação", true);
@@ -3510,6 +3827,10 @@ function onCircuitChanged() {
   }
 
   syncWheelWithSelectedComponent();
+  if (shouldRefreshSelectionUi) {
+    updateSelectionUi();
+    return;
+  }
   requestRender(true);
 }
 

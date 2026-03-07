@@ -222,6 +222,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     if (!markerPoint) continue;
 
     nodeMarkers.push({
+      root,
       x: markerPoint.x,
       y: markerPoint.y,
       voltage: nodeVoltageByRoot.get(root) ?? 0,
@@ -233,6 +234,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     nodeVoltages: nodeVoltageByRoot,
     componentCurrents,
     nodeMarkers,
+    rootByTerminal,
     solutionVector: solution.slice(),
   };
 
