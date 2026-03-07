@@ -1108,7 +1108,7 @@ function drawComponents() {
         state.pendingTerminal &&
         state.pendingTerminal.componentId === component.id &&
         state.pendingTerminal.terminalIndex === i;
-      const radius = component.type === "junction" ? 5.4 : 4.3;
+      const radius = getTerminalRenderRadius(component.type);
 
       ctx.beginPath();
       ctx.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
@@ -1131,6 +1131,14 @@ function drawComponents() {
       ctx.fillText(valueText, screenPoint.x, screenPoint.y);
     }
   }
+}
+
+function getTerminalRenderRadius(componentType) {
+  const isJunction = componentType === "junction";
+  const gridRadius = isJunction ? 0.19 : 0.155;
+  const minRadius = isJunction ? 4.2 : 3.4;
+  const maxRadius = isJunction ? 10.8 : 8.8;
+  return clamp(worldLengthToScreen(gridRadius), minRadius, maxRadius);
 }
 
 function drawOpAmpInputMarkers(component) {
@@ -2766,8 +2774,13 @@ function quantizeResistor(value) {
   return clamp(quantized, 1, 1_000_000);
 }
 
-function getTerminalPosition(componentId, terminalIndex) {
-  const component = getComponentById(componentId);
+function getComponentByIdFromCollection(components, id) {
+  if (id == null) return null;
+  return components.find((component) => component.id === id) || null;
+}
+
+function getTerminalPositionForComponents(components, componentId, terminalIndex) {
+  const component = getComponentByIdFromCollection(components, componentId);
   if (!component) return null;
   const def = COMPONENT_DEFS[component.type];
   const base = def.terminals[terminalIndex];
@@ -2780,8 +2793,12 @@ function getTerminalPosition(componentId, terminalIndex) {
   };
 }
 
-function getTerminalLabelDirection(componentId, terminalIndex) {
-  const component = getComponentById(componentId);
+function getTerminalPosition(componentId, terminalIndex) {
+  return getTerminalPositionForComponents(state.components, componentId, terminalIndex);
+}
+
+function getTerminalLabelDirectionForComponents(components, componentId, terminalIndex) {
+  const component = getComponentByIdFromCollection(components, componentId);
   if (!component) return null;
 
   const def = COMPONENT_DEFS[component.type];
@@ -2796,6 +2813,10 @@ function getTerminalLabelDirection(componentId, terminalIndex) {
   }
 
   return offset.y >= 0 ? "down" : "up";
+}
+
+function getTerminalLabelDirection(componentId, terminalIndex) {
+  return getTerminalLabelDirectionForComponents(state.components, componentId, terminalIndex);
 }
 
 function buildRouteTerminalOptions(fromRef, toRef = null, extraOptions = {}) {
@@ -2854,8 +2875,7 @@ function isTerminalConnected(componentId, terminalIndex) {
 }
 
 function getComponentById(id) {
-  if (id == null) return null;
-  return state.components.find((component) => component.id === id) || null;
+  return getComponentByIdFromCollection(state.components, id);
 }
 
 function getWireById(id) {
@@ -2882,36 +2902,34 @@ function getValueLabelAnchor(component) {
   return { x: component.x - offset, y: component.y };
 }
 
-function runSimulation() {
-  if (state.components.length === 0) {
-    state.simulationResult = null;
+function simulateCircuit({ components, wires, previousSolution = null }) {
+  if (components.length === 0) {
     return { ok: false, message: "Adicione componentes antes de simular" };
   }
 
   const terminals = [];
   const terminalPosition = new Map();
 
-  for (const component of state.components) {
+  for (const component of components) {
     const def = COMPONENT_DEFS[component.type];
     for (let i = 0; i < def.terminals.length; i += 1) {
       const tKey = terminalKey(component.id, i);
       terminals.push(tKey);
-      terminalPosition.set(tKey, getTerminalPosition(component.id, i));
+      terminalPosition.set(tKey, getTerminalPositionForComponents(components, component.id, i));
     }
   }
 
   const dsu = new DisjointSet(terminals);
 
-  for (const wire of state.wires) {
+  for (const wire of wires) {
     dsu.union(terminalKey(wire.from.componentId, wire.from.terminalIndex), terminalKey(wire.to.componentId, wire.to.terminalIndex));
   }
 
-  const groundTerminals = state.components
+  const groundTerminals = components
     .filter((component) => component.type === "ground")
     .map((component) => terminalKey(component.id, 0));
 
   if (groundTerminals.length === 0) {
-    state.simulationResult = null;
     return { ok: false, message: "Inclua pelo menos um terra" };
   }
 
@@ -2934,7 +2952,7 @@ function runSimulation() {
     edges.get(b).add(a);
   }
 
-  for (const component of state.components) {
+  for (const component of components) {
     for (const [fromIndex, toIndex] of getReachabilityTerminalPairs(component)) {
       const n0 = rootByTerminal.get(terminalKey(component.id, fromIndex));
       const n1 = rootByTerminal.get(terminalKey(component.id, toIndex));
@@ -2959,7 +2977,7 @@ function runSimulation() {
     }
   }
 
-  const activeComponents = state.components.filter((component) => {
+  const activeComponents = components.filter((component) => {
     if (!isSimulatedBranchComponent(component.type)) return false;
     const terminalRoots = getComponentTerminalRoots(component, rootByTerminal);
     if (terminalRoots.length === 0) return false;
@@ -2967,7 +2985,6 @@ function runSimulation() {
   });
 
   if (activeComponents.length === 0) {
-    state.simulationResult = null;
     return { ok: false, message: "Nenhum circuito fechado ligado ao terra" };
   }
 
@@ -2992,7 +3009,6 @@ function runSimulation() {
   const size = N + M + O;
 
   if (size === 0) {
-    state.simulationResult = null;
     return { ok: false, message: "Circuito inválido para MNA" };
   }
 
@@ -3022,11 +3038,10 @@ function runSimulation() {
       opAmpRowOffset: N + M,
       rootByTerminal,
       getNodeIdx,
-      previousSolution: state.simulationResult?.data?.solutionVector,
+      previousSolution,
     });
 
     if (!solution) {
-      state.simulationResult = null;
       return {
         ok: false,
         message: "O solver nao convergiu para o circuito nao linear. Revise saturacoes, malhas ideais e entradas flutuantes.",
@@ -3035,7 +3050,6 @@ function runSimulation() {
   } else {
     solution = solveLinearSystem(linearSystem.A, linearSystem.z);
     if (!solution) {
-      state.simulationResult = null;
       return {
         ok: false,
         message: "Sistema singular. Verifique se o circuito está referenciado ao terra.",
@@ -3085,12 +3099,12 @@ function runSimulation() {
     if (!nodeVoltageByRoot.has(root)) continue;
     const ref = parseTerminalKey(terminal);
     const labelDirection = ref
-      ? getTerminalLabelDirection(ref.componentId, ref.terminalIndex)
+      ? getTerminalLabelDirectionForComponents(components, ref.componentId, ref.terminalIndex)
       : null;
     pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal), labelDirection);
   }
 
-  for (const wire of state.wires) {
+  for (const wire of wires) {
     if (!Array.isArray(wire.path) || wire.path.length === 0) continue;
 
     const fromRoot = rootByTerminal.get(terminalKey(wire.from.componentId, wire.from.terminalIndex));
@@ -3127,8 +3141,18 @@ function runSimulation() {
     solutionVector: solution.slice(),
   };
 
-  state.simulationResult = { ok: true, data };
   return { ok: true, data };
+}
+
+function runSimulation() {
+  const result = simulateCircuit({
+    components: state.components,
+    wires: state.wires,
+    previousSolution: state.simulationResult?.data?.solutionVector,
+  });
+
+  state.simulationResult = result.ok ? { ok: true, data: result.data } : null;
+  return result;
 }
 
 function getComponentTerminalRoots(component, rootByTerminal) {
