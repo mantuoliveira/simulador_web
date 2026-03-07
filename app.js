@@ -4,23 +4,33 @@ const MAX_ZOOM = 3.2;
 const IDLE_FPS = 1;
 const IDLE_FRAME_MS = 1000 / IDLE_FPS;
 const NEWTON_MAX_ITERATIONS = 40;
-const NEWTON_RESIDUAL_TOLERANCE = 1e-8;
+const NEWTON_KCL_RESIDUAL_TOLERANCE = 1e-12;
+const NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE = 1e-8;
 const NEWTON_STEP_TOLERANCE = 1e-12;
 const NEWTON_BACKTRACK_STEPS = 14;
 const NEWTON_SOURCE_STEPS = 20;
 const MAX_DIODE_EXP_ARG = 40;
 const MAX_DIODE_VOLTAGE_STEP = 0.03;
+const MAX_BJT_JUNCTION_VOLTAGE_STEP = 0.12;
 const OP_AMP_OPEN_LOOP_GAIN = 200000;
 const OP_AMP_MIN_SUPPLY = 1;
 const OP_AMP_MAX_SUPPLY = 24;
 const OP_AMP_SUPPLY_STEP = 0.5;
 const MAX_OP_AMP_TANH_ARG = 18;
+const MAX_BJT_SATURATION_ARG = 24;
 const OP_AMP_TOP_INPUT_TERMINAL_INDEX = 0;
 const OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX = 1;
 const OP_AMP_OUTPUT_TERMINAL_INDEX = 2;
+const BJT_BASE_TERMINAL_INDEX = 0;
+const BJT_COLLECTOR_TERMINAL_INDEX = 1;
+const BJT_EMITTER_TERMINAL_INDEX = 2;
+const BJT_MIN_BETA = 20;
+const BJT_MAX_BETA = 300;
+const BJT_BETA_STEP = 1;
 const OCCUPIED_WIRE_EDGE_PENALTY = 40;
 const NODE_PROXIMITY_PENALTY = 18;
 const TURN_PENALTY = 3;
+const TERMINAL_DIRECTION_MISMATCH_PENALTY = 0.75;
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -162,6 +172,44 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
   },
+  bjt_npn: {
+    label: "Trans NPN",
+    terminals: [
+      [-2, 0],
+      [0, -2],
+      [0, 2],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 1.55,
+    renderW: 4,
+    renderH: 4,
+    defaultValue: 100,
+    editable: true,
+    showValueLabel: false,
+    unit: "beta",
+    model: {
+      baseSaturationCurrent: 1e-14,
+      collectorSaturationCurrent: 1e-14,
+      idealityFactor: 1.2,
+      thermalVoltage: 0.02585,
+      gmin: 1e-9,
+      saturationVoltage: 0.15,
+      saturationSharpness: 0.04,
+      collectorEmitterConductance: 1e-9,
+    },
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 2.5, y: 2.5 },
+  },
   junction: {
     label: "Junção",
     terminals: [[0, 0]],
@@ -196,7 +244,7 @@ const COMPONENT_DEFS = {
   },
 };
 
-const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "op_amp", "diode", "ground"];
+const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "op_amp", "diode", "bjt_npn", "ground"];
 
 const state = {
   components: [],
@@ -515,7 +563,13 @@ function tryInsertAutoGround(target) {
     state.components.push(ground);
 
     const groundTerminal = getTerminalPosition(groundId, 0);
-    const route = groundTerminal ? routeWire(targetPosition, groundTerminal) : null;
+    const route = groundTerminal
+      ? routeWire(
+          targetPosition,
+          groundTerminal,
+          buildRouteTerminalOptions(target, { componentId: groundId, terminalIndex: 0 })
+        )
+      : null;
     if (!route) {
       state.components.pop();
       continue;
@@ -1117,15 +1171,16 @@ function drawSimulationAnnotations(data) {
     const padX = 7;
     const boxW = textW + padX * 2;
     const boxH = 20;
+    const placement = getNodeMarkerPlacement(sp, boxW, boxH, marker.labelDirection);
 
     ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
-    roundedRect(ctx, sp.x - boxW / 2, sp.y - 28, boxW, boxH, 8);
+    roundedRect(ctx, placement.boxX, placement.boxY, boxW, boxH, 8);
     ctx.fill();
 
     ctx.fillStyle = "#f8fafc";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, sp.x, sp.y - 18);
+    ctx.fillText(label, placement.textX, placement.textY);
   }
 
   for (const component of state.components) {
@@ -1135,12 +1190,59 @@ function drawSimulationAnnotations(data) {
   }
 }
 
+function getCurrentArrowTerminalPair(component) {
+  if (component.type === "bjt_npn") {
+    return [BJT_COLLECTOR_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX];
+  }
+
+  return [0, 1];
+}
+
+function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") {
+  const gap = 8;
+
+  if (labelDirection === "down") {
+    return {
+      boxX: screenPoint.x - boxW * 0.5,
+      boxY: screenPoint.y + gap,
+      textX: screenPoint.x,
+      textY: screenPoint.y + gap + boxH * 0.5,
+    };
+  }
+
+  if (labelDirection === "left") {
+    return {
+      boxX: screenPoint.x - gap - boxW,
+      boxY: screenPoint.y - boxH * 0.5,
+      textX: screenPoint.x - gap - boxW * 0.5,
+      textY: screenPoint.y,
+    };
+  }
+
+  if (labelDirection === "right") {
+    return {
+      boxX: screenPoint.x + gap,
+      boxY: screenPoint.y - boxH * 0.5,
+      textX: screenPoint.x + gap + boxW * 0.5,
+      textY: screenPoint.y,
+    };
+  }
+
+  return {
+    boxX: screenPoint.x - boxW * 0.5,
+    boxY: screenPoint.y - gap - boxH,
+    textX: screenPoint.x,
+    textY: screenPoint.y - gap - boxH * 0.5,
+  };
+}
+
 function drawCurrentArrow(component, current) {
   const def = COMPONENT_DEFS[component.type];
   if (def.terminals.length < 2) return;
 
-  const p0 = getTerminalPosition(component.id, 0);
-  const p1 = getTerminalPosition(component.id, 1);
+  const [fromIndex, toIndex] = getCurrentArrowTerminalPair(component);
+  const p0 = getTerminalPosition(component.id, fromIndex);
+  const p1 = getTerminalPosition(component.id, toIndex);
   if (!p0 || !p1) return;
 
   let dirX = p1.x - p0.x;
@@ -1186,6 +1288,13 @@ function drawCurrentArrow(component, current) {
 
   if (component.type === "diode") {
     lateralOffset = 1.2;
+  }
+
+  if (component.type === "bjt_npn") {
+    const label = getValueLabelAnchor(component);
+    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
+    sideSign = labelProjection >= 0 ? -1 : 1;
+    lateralOffset = 1.08;
   }
 
   const sideNormalX = normalX * sideSign;
@@ -1241,11 +1350,32 @@ function drawCurrentArrow(component, current) {
     textOffset += Math.max(12, state.camera.zoom * 14);
   }
 
-  const textX = (s.x + e.x) * 0.5 + sideNormalX * textOffset;
-  const textY = (s.y + e.y) * 0.5 + sideNormalY * textOffset;
+  const arrowMidX = (s.x + e.x) * 0.5;
+  const arrowMidY = (s.y + e.y) * 0.5;
+  const textGap = Math.max(7, state.camera.zoom * 8);
+  const leftSideTextGap = Math.max(4, state.camera.zoom * 5);
+  let textX = arrowMidX + sideNormalX * textOffset;
+  let textY = arrowMidY + sideNormalY * textOffset;
+  let textAlign = "center";
+  let textBaseline = "middle";
+
+  if (Math.abs(sideNormalX) >= Math.abs(sideNormalY) && sideNormalX > 0.15) {
+    textAlign = "left";
+    textX += textGap;
+  } else if (Math.abs(sideNormalX) >= Math.abs(sideNormalY) && sideNormalX < -0.15) {
+    textAlign = "right";
+    textX -= leftSideTextGap;
+  } else if (sideNormalY > 0.15) {
+    textBaseline = "top";
+    textY += textGap * 0.7;
+  } else if (sideNormalY < -0.15) {
+    textBaseline = "bottom";
+    textY -= textGap * 0.7;
+  }
+
   ctx.fillStyle = "#7f1d1d";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  ctx.textAlign = textAlign;
+  ctx.textBaseline = textBaseline;
   ctx.fillText(text, textX, textY);
 }
 
@@ -1440,7 +1570,7 @@ function handleTerminalTap(componentId, terminalIndex) {
     return;
   }
 
-  const route = routeWire(start, end);
+  const route = routeWire(start, end, buildRouteTerminalOptions(first, { componentId, terminalIndex }));
   if (!route) {
     showStatus("Não foi possível rotear o fio", true);
     state.pendingTerminal = null;
@@ -1500,7 +1630,7 @@ function handleWireTap(wireHit) {
     return;
   }
 
-  const branchRoute = routeWire(start, wireHit.point);
+  const branchRoute = routeWire(start, wireHit.point, buildRouteTerminalOptions(pending));
   if (!branchRoute) {
     showStatus("Nao foi possivel conectar ao fio", true);
     state.pendingTerminal = null;
@@ -1844,7 +1974,11 @@ function rerouteConnectedWires(componentId) {
     const end = getTerminalPosition(wire.to.componentId, wire.to.terminalIndex);
     if (!start || !end) return false;
 
-    const route = routeWire(start, end, { ignoreWireIds: new Set([wire.id]) });
+    const route = routeWire(
+      start,
+      end,
+      buildRouteTerminalOptions(wire.from, wire.to, { ignoreWireIds: new Set([wire.id]) })
+    );
     if (!route) return false;
     wire.path = route;
   }
@@ -1873,7 +2007,10 @@ function routeWire(start, end, options = {}) {
   blocked.delete(key(end.x, end.y));
 
   const bounds = routeBounds(start, end);
-  return findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds);
+  return findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, {
+    preferredStartDirection: options.startDirection || null,
+    preferredEndDirection: options.endDirection || null,
+  });
 }
 
 function routeBounds(start, end) {
@@ -1899,7 +2036,7 @@ function routeBounds(start, end) {
   };
 }
 
-function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds) {
+function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, preferences = {}) {
   const startKey = key(start.x, start.y);
   const endKey = key(end.x, end.y);
   const startStateKey = pathStateKey(start, null);
@@ -1907,6 +2044,8 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
   const cameFrom = new Map();
   const gScore = new Map([[startStateKey, 0]]);
   const fScore = new Map([[startStateKey, manhattan(start, end)]]);
+  const preferredStartDirection = preferences.preferredStartDirection || null;
+  const preferredEndDirection = preferences.preferredEndDirection || null;
 
   while (open.size > 0) {
     let currentStateKey = null;
@@ -1958,13 +2097,25 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
         nk !== startKey && nk !== endKey && nodeProximity.has(nk) ? NODE_PROXIMITY_PENALTY : 0;
       const turnPenalty =
         currentState.direction && currentState.direction !== nextDirection ? TURN_PENALTY : 0;
+      const startDirectionPenalty =
+        !currentState.direction &&
+        preferredStartDirection &&
+        nextDirection !== preferredStartDirection
+          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
+          : 0;
+      const endDirectionPenalty =
+        nk === endKey && preferredEndDirection && nextDirection !== preferredEndDirection
+          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
+          : 0;
       const nextStateKey = pathStateKey(next, nextDirection);
       const tentative =
         (gScore.get(currentStateKey) ?? Infinity) +
         1 +
         edgePenalty +
         proximityPenalty +
-        turnPenalty;
+        turnPenalty +
+        startDirectionPenalty +
+        endDirectionPenalty;
       if (tentative < (gScore.get(nextStateKey) ?? Infinity)) {
         cameFrom.set(nextStateKey, currentStateKey);
         gScore.set(nextStateKey, tentative);
@@ -2359,7 +2510,7 @@ function tryMergeSplitJunction(junctionId, connectedWires) {
   ) {
     path = clonePath(meta.splitOriginalPath);
   } else {
-    path = routeWire(start, end);
+    path = routeWire(start, end, buildRouteTerminalOptions(meta.splitOriginalFrom, meta.splitOriginalTo));
   }
 
   if (!path) return null;
@@ -2408,12 +2559,25 @@ function isSimulatedBranchComponent(type) {
     type === "current_source" ||
     type === "resistor" ||
     type === "diode" ||
+    type === "bjt_npn" ||
     type === "op_amp"
   );
 }
 
-function createsReachabilityEdge(type) {
-  return type !== "op_amp" && isSimulatedBranchComponent(type);
+function getReachabilityTerminalPairs(component) {
+  if (!component || component.type === "op_amp" || !isSimulatedBranchComponent(component.type)) {
+    return [];
+  }
+
+  if (component.type === "bjt_npn") {
+    return [
+      [BJT_BASE_TERMINAL_INDEX, BJT_COLLECTOR_TERMINAL_INDEX],
+      [BJT_BASE_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX],
+      [BJT_COLLECTOR_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX],
+    ];
+  }
+
+  return [[0, 1]];
 }
 
 function updateSelectionUi() {
@@ -2507,6 +2671,10 @@ function valueFromNormalized(type, normalized) {
     return snapToStep(OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * n, OP_AMP_SUPPLY_STEP);
   }
 
+  if (type === "bjt_npn") {
+    return snapToStep(BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * n, BJT_BETA_STEP);
+  }
+
   return 0;
 }
 
@@ -2530,6 +2698,11 @@ function normalizedFromValue(component) {
   if (component.type === "op_amp") {
     const safe = clamp(Math.abs(value), OP_AMP_MIN_SUPPLY, OP_AMP_MAX_SUPPLY);
     return clamp((safe - OP_AMP_MIN_SUPPLY) / (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY), 0, 1);
+  }
+
+  if (component.type === "bjt_npn") {
+    const safe = clamp(value, BJT_MIN_BETA, BJT_MAX_BETA);
+    return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
   }
 
   return 0;
@@ -2568,6 +2741,45 @@ function getTerminalPosition(componentId, terminalIndex) {
   };
 }
 
+function getTerminalLabelDirection(componentId, terminalIndex) {
+  const component = getComponentById(componentId);
+  if (!component) return null;
+
+  const def = COMPONENT_DEFS[component.type];
+  const base = def?.terminals[terminalIndex];
+  if (!base) return null;
+
+  const offset = rotateOffset(base[0], base[1], component.rotation);
+  if (offset.x === 0 && offset.y === 0) return null;
+
+  if (Math.abs(offset.x) >= Math.abs(offset.y)) {
+    return offset.x >= 0 ? "right" : "left";
+  }
+
+  return offset.y >= 0 ? "down" : "up";
+}
+
+function buildRouteTerminalOptions(fromRef, toRef = null, extraOptions = {}) {
+  const options = { ...extraOptions };
+
+  if (fromRef) {
+    const startDirection = getTerminalLabelDirection(fromRef.componentId, fromRef.terminalIndex);
+    if (startDirection) {
+      options.startDirection = startDirection;
+    }
+  }
+
+  if (toRef) {
+    const outwardDirection = getTerminalLabelDirection(toRef.componentId, toRef.terminalIndex);
+    const endDirection = oppositeDirection(outwardDirection);
+    if (endDirection) {
+      options.endDirection = endDirection;
+    }
+  }
+
+  return options;
+}
+
 function getOpAmpInputTerminalIndices(component) {
   const inputsSwapped = component?.inputsSwapped === true;
   return inputsSwapped
@@ -2604,6 +2816,8 @@ function getValueLabelAnchor(component) {
   let offset = 1.62;
   if (component.type === "op_amp") {
     offset = 2.2;
+  } else if (component.type === "bjt_npn") {
+    offset = 2.1;
   } else if (component.type === "current_source") {
     offset = 2.05;
   } else if (component.type === "voltage_source") {
@@ -2669,13 +2883,12 @@ function runSimulation() {
   }
 
   for (const component of state.components) {
-    if (!createsReachabilityEdge(component.type)) continue;
-    const t0 = terminalKey(component.id, 0);
-    const t1 = terminalKey(component.id, 1);
-    const n0 = rootByTerminal.get(t0);
-    const n1 = rootByTerminal.get(t1);
-    if (!n0 || !n1) continue;
-    addEdge(n0, n1);
+    for (const [fromIndex, toIndex] of getReachabilityTerminalPairs(component)) {
+      const n0 = rootByTerminal.get(terminalKey(component.id, fromIndex));
+      const n1 = rootByTerminal.get(terminalKey(component.id, toIndex));
+      if (!n0 || !n1) continue;
+      addEdge(n0, n1);
+    }
   }
 
   const reachableNodes = new Set([groundRoot]);
@@ -2718,6 +2931,7 @@ function runSimulation() {
 
   const voltageSources = activeComponents.filter((component) => component.type === "voltage_source");
   const diodes = activeComponents.filter((component) => component.type === "diode");
+  const bjts = activeComponents.filter((component) => component.type === "bjt_npn");
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
 
   const N = nonGroundRoots.length;
@@ -2745,12 +2959,14 @@ function runSimulation() {
   );
 
   let solution = null;
-  if (diodes.length > 0 || opAmps.length > 0) {
+  if (diodes.length > 0 || bjts.length > 0 || opAmps.length > 0) {
     solution = solveNonlinearCircuit({
       baseMatrix: linearSystem.A,
       baseVector: linearSystem.z,
       diodes,
+      bjts,
       opAmps,
+      nodeCount: N,
       opAmpRowOffset: N + M,
       rootByTerminal,
       getNodeIdx,
@@ -2795,6 +3011,14 @@ function runSimulation() {
       componentCurrents.set(component.id, component.value || 0);
     } else if (component.type === "diode") {
       componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
+    } else if (component.type === "bjt_npn") {
+      const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
+      const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
+      const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+      const vBase = nodeVoltageByRoot.get(rBase) ?? 0;
+      const vCollector = nodeVoltageByRoot.get(rCollector) ?? 0;
+      const vEmitter = nodeVoltageByRoot.get(rEmitter) ?? 0;
+      componentCurrents.set(component.id, evaluateBjtModel(component, vBase - vEmitter, vBase - vCollector).ic);
     }
   }
 
@@ -2806,30 +3030,40 @@ function runSimulation() {
   const markerGroups = new Map();
   for (const [terminal, root] of rootByTerminal.entries()) {
     if (!nodeVoltageByRoot.has(root)) continue;
-    if (!markerGroups.has(root)) {
-      markerGroups.set(root, []);
-    }
+    const ref = parseTerminalKey(terminal);
+    const labelDirection = ref
+      ? getTerminalLabelDirection(ref.componentId, ref.terminalIndex)
+      : null;
+    pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal), labelDirection);
+  }
 
-    const pos = terminalPosition.get(terminal);
-    if (pos) {
-      markerGroups.get(root).push(pos);
+  for (const wire of state.wires) {
+    if (!Array.isArray(wire.path) || wire.path.length === 0) continue;
+
+    const fromRoot = rootByTerminal.get(terminalKey(wire.from.componentId, wire.from.terminalIndex));
+    const toRoot = rootByTerminal.get(terminalKey(wire.to.componentId, wire.to.terminalIndex));
+    if (!fromRoot || fromRoot !== toRoot || !nodeVoltageByRoot.has(fromRoot)) continue;
+
+    for (const point of wire.path) {
+      pushNodeMarkerGroupPoint(markerGroups, fromRoot, point);
     }
   }
 
-  const groundMarkerPoints = groundTerminals
-    .map((terminal) => terminalPosition.get(terminal))
-    .filter(Boolean);
+  const groundMarkerPoints = dedupeMarkerPoints(
+    groundTerminals.map((terminal) => terminalPosition.get(terminal))
+  );
 
   const nodeMarkers = [];
-  for (const [root, points] of markerGroups.entries()) {
-    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : points;
-    if (!markerPoints.length) continue;
+  for (const [root, group] of markerGroups.entries()) {
+    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : group.points;
+    const markerPoint = chooseNodeMarkerAnchor(group.points, markerPoints, group.pointDirections);
+    if (!markerPoint) continue;
 
-    const sum = markerPoints.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
     nodeMarkers.push({
-      x: sum.x / markerPoints.length,
-      y: sum.y / markerPoints.length,
-      voltage: nodeVoltageByRoot.get(root) || 0,
+      x: markerPoint.x,
+      y: markerPoint.y,
+      voltage: nodeVoltageByRoot.get(root) ?? 0,
+      labelDirection: markerPoint.labelDirection,
     });
   }
 
@@ -2856,6 +3090,131 @@ function getComponentTerminalRoots(component, rootByTerminal) {
     }
   }
   return roots;
+}
+
+function pushNodeMarkerGroupPoint(groups, root, point, labelDirection = null) {
+  if (!root || !point) return;
+
+  let group = groups.get(root);
+  if (!group) {
+    group = {
+      points: [],
+      pointKeys: new Set(),
+      pointDirections: new Map(),
+    };
+    groups.set(root, group);
+  }
+
+  const pointKeyValue = key(point.x, point.y);
+  if (!group.pointKeys.has(pointKeyValue)) {
+    group.pointKeys.add(pointKeyValue);
+    group.points.push(clonePoint(point));
+  }
+
+  if (!labelDirection) return;
+
+  let directions = group.pointDirections.get(pointKeyValue);
+  if (!directions) {
+    directions = new Set();
+    group.pointDirections.set(pointKeyValue, directions);
+  }
+  directions.add(labelDirection);
+}
+
+function dedupeMarkerPoints(points) {
+  const unique = [];
+  const seen = new Set();
+
+  for (const point of points) {
+    if (!point) continue;
+
+    const pointKeyValue = key(point.x, point.y);
+    if (seen.has(pointKeyValue)) continue;
+
+    seen.add(pointKeyValue);
+    unique.push(clonePoint(point));
+  }
+
+  return unique;
+}
+
+function chooseNodeMarkerAnchor(geometryPoints, candidatePoints = geometryPoints, pointDirections = new Map()) {
+  // Keep the label attached to a real point on the node instead of the averaged centroid,
+  // which can fall in empty canvas space for large nets.
+  const geometry = dedupeMarkerPoints(geometryPoints);
+  const candidates = dedupeMarkerPoints(candidatePoints);
+  if (!geometry.length || !candidates.length) return null;
+
+  const centroid = geometry.reduce(
+    (acc, point) => ({
+      x: acc.x + point.x,
+      y: acc.y + point.y,
+    }),
+    { x: 0, y: 0 }
+  );
+  centroid.x /= geometry.length;
+  centroid.y /= geometry.length;
+
+  let bestPoint = candidates[0];
+  let bestDistance = distanceSquared(bestPoint, centroid);
+
+  for (let index = 1; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const candidateDistance = distanceSquared(candidate, centroid);
+
+    if (
+      candidateDistance < bestDistance - 1e-9 ||
+      (Math.abs(candidateDistance - bestDistance) <= 1e-9 && isBetterMarkerTieBreak(candidate, bestPoint))
+    ) {
+      bestPoint = candidate;
+      bestDistance = candidateDistance;
+    }
+  }
+
+  return {
+    x: bestPoint.x,
+    y: bestPoint.y,
+    labelDirection: chooseNodeMarkerLabelDirection(bestPoint, pointDirections),
+  };
+}
+
+function distanceSquared(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function isBetterMarkerTieBreak(candidate, currentBest) {
+  if (candidate.y !== currentBest.y) {
+    return candidate.y < currentBest.y;
+  }
+
+  return candidate.x < currentBest.x;
+}
+
+function chooseNodeMarkerLabelDirection(point, pointDirections) {
+  const directions = pointDirections.get(key(point.x, point.y));
+  if (!directions || directions.size === 0) {
+    return "up";
+  }
+
+  if (directions.has("down") && !directions.has("up")) {
+    return "down";
+  }
+
+  if (directions.has("up") && !directions.has("down")) {
+    return "up";
+  }
+
+  if (directions.has("right") && !directions.has("left")) {
+    return "right";
+  }
+
+  if (directions.has("left") && !directions.has("right")) {
+    return "left";
+  }
+
+  return "up";
 }
 
 function buildLinearMnaSystem(activeComponents, voltageSources, opAmps, rootByTerminal, getNodeIdx, nodeCount) {
@@ -2918,7 +3277,9 @@ function solveNonlinearCircuit({
   baseMatrix,
   baseVector,
   diodes,
+  bjts,
   opAmps,
+  nodeCount,
   opAmpRowOffset,
   rootByTerminal,
   getNodeIdx,
@@ -2926,6 +3287,7 @@ function solveNonlinearCircuit({
 }) {
   const size = baseVector.length;
   const hasPreviousSolution = Array.isArray(previousSolution) && previousSolution.length === size;
+  const linearGuess = solveLinearSystem(baseMatrix, baseVector);
 
   if (hasPreviousSolution) {
     const direct = runNewtonIterations(
@@ -2933,31 +3295,79 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      bjts,
       opAmps,
+      nodeCount,
       opAmpRowOffset,
       rootByTerminal,
-      getNodeIdx
+      getNodeIdx,
+      1
     );
     if (direct) {
       return direct;
     }
   }
 
-  let vector = Array(size).fill(0);
+  if (linearGuess) {
+    const directFromLinear = runNewtonIterations(
+      linearGuess.slice(),
+      baseMatrix,
+      baseVector,
+      diodes,
+      bjts,
+      opAmps,
+      nodeCount,
+      opAmpRowOffset,
+      rootByTerminal,
+      getNodeIdx,
+      1
+    );
+    if (directFromLinear) {
+      return directFromLinear;
+    }
+  }
+
+  let vector =
+    solveLinearSystem(
+      baseMatrix,
+      baseVector.map((value) => value / NEWTON_SOURCE_STEPS)
+    ) || Array(size).fill(0);
   let steppingFailed = false;
   for (let stepIndex = 1; stepIndex <= NEWTON_SOURCE_STEPS; stepIndex += 1) {
     const scale = stepIndex / NEWTON_SOURCE_STEPS;
     const scaledBaseVector = baseVector.map((value) => value * scale);
-    const steppedVector = runNewtonIterations(
+    let steppedVector = runNewtonIterations(
       vector,
       baseMatrix,
       scaledBaseVector,
       diodes,
+      bjts,
       opAmps,
+      nodeCount,
       opAmpRowOffset,
       rootByTerminal,
-      getNodeIdx
+      getNodeIdx,
+      scale
     );
+
+    if (!steppedVector) {
+      const scaledLinearGuess = solveLinearSystem(baseMatrix, scaledBaseVector);
+      if (scaledLinearGuess) {
+        steppedVector = runNewtonIterations(
+          scaledLinearGuess,
+          baseMatrix,
+          scaledBaseVector,
+          diodes,
+          bjts,
+          opAmps,
+          nodeCount,
+          opAmpRowOffset,
+          rootByTerminal,
+          getNodeIdx,
+          scale
+        );
+      }
+    }
 
     if (!steppedVector) {
       steppingFailed = true;
@@ -2976,13 +3386,35 @@ function solveNonlinearCircuit({
     baseMatrix,
     baseVector,
     diodes,
+    bjts,
     opAmps,
+    nodeCount,
     opAmpRowOffset,
     rootByTerminal,
-    getNodeIdx
+    getNodeIdx,
+    1
   );
   if (resumed) {
     return resumed;
+  }
+
+  if (linearGuess) {
+    const retriedLinear = runNewtonIterations(
+      linearGuess.slice(),
+      baseMatrix,
+      baseVector,
+      diodes,
+      bjts,
+      opAmps,
+      nodeCount,
+      opAmpRowOffset,
+      rootByTerminal,
+      getNodeIdx,
+      1
+    );
+    if (retriedLinear) {
+      return retriedLinear;
+    }
   }
 
   if (maxAbsValue(vector) > 0) {
@@ -2991,10 +3423,13 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      bjts,
       opAmps,
+      nodeCount,
       opAmpRowOffset,
       rootByTerminal,
-      getNodeIdx
+      getNodeIdx,
+      1
     );
   }
 
@@ -3006,10 +3441,13 @@ function runNewtonIterations(
   baseMatrix,
   baseVector,
   diodes,
+  bjts,
   opAmps,
+  nodeCount,
   opAmpRowOffset,
   rootByTerminal,
-  getNodeIdx
+  getNodeIdx,
+  nonlinearScale = 1
 ) {
   let vector = initialVector.slice();
 
@@ -3019,13 +3457,17 @@ function runNewtonIterations(
       baseMatrix,
       baseVector,
       diodes,
+      bjts,
       opAmps,
+      nodeCount,
       opAmpRowOffset,
       rootByTerminal,
-      getNodeIdx
+      getNodeIdx,
+      nonlinearScale
     );
-    const residualNorm = maxAbsValue(residual);
-    if (residualNorm <= NEWTON_RESIDUAL_TOLERANCE) {
+    const residualMetrics = evaluateResidualMetrics(residual, nodeCount);
+    const residualScore = residualMetricsToScore(residualMetrics);
+    if (isResidualConverged(residualMetrics)) {
       return vector;
     }
 
@@ -3036,7 +3478,7 @@ function runNewtonIterations(
 
     const stepNorm = maxAbsValue(step);
     if (stepNorm <= NEWTON_STEP_TOLERANCE) {
-      return residualNorm <= NEWTON_RESIDUAL_TOLERANCE * 10 ? vector : null;
+      return isResidualCloseEnough(residualMetrics) ? vector : null;
     }
 
     let damping = 1;
@@ -3044,10 +3486,11 @@ function runNewtonIterations(
     let nextResidualNorm = Infinity;
 
     for (let attempt = 0; attempt < NEWTON_BACKTRACK_STEPS; attempt += 1) {
-      const candidate = limitCandidateDiodeVoltages(
+      const candidate = limitCandidateJunctionVoltages(
         vector.map((value, index) => value + step[index] * damping),
         vector,
         diodes,
+        bjts,
         rootByTerminal,
         getNodeIdx
       );
@@ -3056,13 +3499,16 @@ function runNewtonIterations(
         baseMatrix,
         baseVector,
         diodes,
+        bjts,
         opAmps,
+        nodeCount,
         opAmpRowOffset,
         rootByTerminal,
-        getNodeIdx
+        getNodeIdx,
+        nonlinearScale
       );
 
-      if (candidateResidualNorm < residualNorm) {
+      if (candidateResidualNorm < residualScore) {
         nextVector = candidate;
         nextResidualNorm = candidateResidualNorm;
         break;
@@ -3082,7 +3528,7 @@ function runNewtonIterations(
 
     vector = nextVector;
 
-    if (nextResidualNorm <= NEWTON_RESIDUAL_TOLERANCE && stepNorm * damping <= NEWTON_STEP_TOLERANCE) {
+    if (nextResidualNorm <= 1 && stepNorm * damping <= NEWTON_STEP_TOLERANCE) {
       return vector;
     }
   }
@@ -3095,11 +3541,15 @@ function evaluateNonlinearSystem(
   baseMatrix,
   baseVector,
   diodes,
+  bjts,
   opAmps,
+  nodeCount,
   opAmpRowOffset,
   rootByTerminal,
-  getNodeIdx
+  getNodeIdx,
+  nonlinearScale = 1
 ) {
+  const deviceScale = clamp(nonlinearScale, 0, 1);
   const residual = multiplyMatrixVector(baseMatrix, vector).map(
     (value, index) => value - baseVector[index]
   );
@@ -3113,21 +3563,46 @@ function evaluateNonlinearSystem(
     const v0 = n0 >= 0 ? vector[n0] : 0;
     const v1 = n1 >= 0 ? vector[n1] : 0;
     const { current, conductance } = evaluateDiodeModel(component, v0 - v1);
+    const scaledCurrent = current * deviceScale;
+    const scaledConductance = conductance * deviceScale;
 
     if (n0 >= 0) {
-      residual[n0] += current;
-      jacobian[n0][n0] += conductance;
+      residual[n0] += scaledCurrent;
+      jacobian[n0][n0] += scaledConductance;
     }
 
     if (n1 >= 0) {
-      residual[n1] -= current;
-      jacobian[n1][n1] += conductance;
+      residual[n1] -= scaledCurrent;
+      jacobian[n1][n1] += scaledConductance;
     }
 
     if (n0 >= 0 && n1 >= 0) {
-      jacobian[n0][n1] -= conductance;
-      jacobian[n1][n0] -= conductance;
+      jacobian[n0][n1] -= scaledConductance;
+      jacobian[n1][n0] -= scaledConductance;
     }
+  }
+
+  for (const component of bjts) {
+    const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
+    const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
+    const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+    const nBase = getNodeIdx(rBase);
+    const nCollector = getNodeIdx(rCollector);
+    const nEmitter = getNodeIdx(rEmitter);
+    const vBase = nBase >= 0 ? vector[nBase] : 0;
+    const vCollector = nCollector >= 0 ? vector[nCollector] : 0;
+    const vEmitter = nEmitter >= 0 ? vector[nEmitter] : 0;
+    const model = evaluateBjtModel(component, vBase - vEmitter, vBase - vCollector);
+
+    stampBjtResidualAndJacobian(
+      residual,
+      jacobian,
+      nBase,
+      nCollector,
+      nEmitter,
+      model,
+      deviceScale
+    );
   }
 
   opAmps.forEach((component, index) => {
@@ -3160,22 +3635,65 @@ function evaluateResidualNorm(
   baseMatrix,
   baseVector,
   diodes,
+  bjts,
   opAmps,
+  nodeCount,
   opAmpRowOffset,
   rootByTerminal,
-  getNodeIdx
+  getNodeIdx,
+  nonlinearScale = 1
 ) {
   const { residual } = evaluateNonlinearSystem(
     vector,
     baseMatrix,
     baseVector,
     diodes,
+    bjts,
     opAmps,
+    nodeCount,
     opAmpRowOffset,
     rootByTerminal,
-    getNodeIdx
+    getNodeIdx,
+    nonlinearScale
   );
-  return maxAbsValue(residual);
+  return residualMetricsToScore(evaluateResidualMetrics(residual, nodeCount));
+}
+
+function evaluateResidualMetrics(residual, nodeCount) {
+  let maxKclResidual = 0;
+  let maxConstraintResidual = 0;
+
+  for (let index = 0; index < residual.length; index += 1) {
+    const absResidual = Math.abs(residual[index]);
+    if (index < nodeCount) {
+      maxKclResidual = Math.max(maxKclResidual, absResidual);
+    } else {
+      maxConstraintResidual = Math.max(maxConstraintResidual, absResidual);
+    }
+  }
+
+  return { maxKclResidual, maxConstraintResidual };
+}
+
+function residualMetricsToScore(metrics) {
+  const nodeScore = metrics.maxKclResidual / NEWTON_KCL_RESIDUAL_TOLERANCE;
+  const constraintScore =
+    metrics.maxConstraintResidual / NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE;
+  return Math.max(nodeScore, constraintScore);
+}
+
+function isResidualConverged(metrics) {
+  return (
+    metrics.maxKclResidual <= NEWTON_KCL_RESIDUAL_TOLERANCE &&
+    metrics.maxConstraintResidual <= NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE
+  );
+}
+
+function isResidualCloseEnough(metrics) {
+  return (
+    metrics.maxKclResidual <= NEWTON_KCL_RESIDUAL_TOLERANCE * 10 &&
+    metrics.maxConstraintResidual <= NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE * 10
+  );
 }
 
 function stampConductance(matrix, n0, n1, conductance) {
@@ -3187,8 +3705,8 @@ function stampConductance(matrix, n0, n1, conductance) {
   }
 }
 
-function limitCandidateDiodeVoltages(candidate, previousVector, diodes, rootByTerminal, getNodeIdx) {
-  if (!diodes.length) return candidate;
+function limitCandidateJunctionVoltages(candidate, previousVector, diodes, bjts, rootByTerminal, getNodeIdx) {
+  if (!diodes.length && !bjts.length) return candidate;
 
   const limited = candidate.slice();
 
@@ -3197,23 +3715,19 @@ function limitCandidateDiodeVoltages(candidate, previousVector, diodes, rootByTe
     const r1 = rootByTerminal.get(terminalKey(component.id, 1));
     const n0 = getNodeIdx(r0);
     const n1 = getNodeIdx(r1);
-    const previousDrop = getBranchVoltage(previousVector, n0, n1);
-    const nextDrop = getBranchVoltage(limited, n0, n1);
-    const maxDrop = previousDrop + MAX_DIODE_VOLTAGE_STEP;
-    const minDrop = previousDrop - MAX_DIODE_VOLTAGE_STEP;
-    const boundedDrop = clamp(nextDrop, minDrop, maxDrop);
-    const correction = boundedDrop - nextDrop;
+    limitBranchVoltageStep(limited, previousVector, n0, n1, MAX_DIODE_VOLTAGE_STEP);
+  }
 
-    if (Math.abs(correction) < 1e-12) continue;
+  for (const component of bjts) {
+    const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
+    const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
+    const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+    const nBase = getNodeIdx(rBase);
+    const nCollector = getNodeIdx(rCollector);
+    const nEmitter = getNodeIdx(rEmitter);
 
-    if (n0 >= 0 && n1 >= 0) {
-      limited[n0] += correction * 0.5;
-      limited[n1] -= correction * 0.5;
-    } else if (n0 >= 0) {
-      limited[n0] += correction;
-    } else if (n1 >= 0) {
-      limited[n1] -= correction;
-    }
+    limitBranchVoltageStep(limited, previousVector, nBase, nEmitter, MAX_BJT_JUNCTION_VOLTAGE_STEP);
+    limitBranchVoltageStep(limited, previousVector, nBase, nCollector, MAX_BJT_JUNCTION_VOLTAGE_STEP);
   }
 
   return limited;
@@ -3223,6 +3737,57 @@ function getBranchVoltage(vector, n0, n1) {
   const v0 = n0 >= 0 ? vector[n0] : 0;
   const v1 = n1 >= 0 ? vector[n1] : 0;
   return v0 - v1;
+}
+
+function limitBranchVoltageStep(candidate, previousVector, n0, n1, maxVoltageStep = MAX_DIODE_VOLTAGE_STEP) {
+  const previousDrop = getBranchVoltage(previousVector, n0, n1);
+  const nextDrop = getBranchVoltage(candidate, n0, n1);
+  const maxDrop = previousDrop + maxVoltageStep;
+  const minDrop = previousDrop - maxVoltageStep;
+  const boundedDrop = clamp(nextDrop, minDrop, maxDrop);
+  const correction = boundedDrop - nextDrop;
+
+  if (Math.abs(correction) < 1e-12) return;
+
+  if (n0 >= 0 && n1 >= 0) {
+    candidate[n0] += correction * 0.5;
+    candidate[n1] -= correction * 0.5;
+  } else if (n0 >= 0) {
+    candidate[n0] += correction;
+  } else if (n1 >= 0) {
+    candidate[n1] -= correction;
+  }
+}
+
+function stampBjtResidualAndJacobian(
+  residual,
+  jacobian,
+  nBase,
+  nCollector,
+  nEmitter,
+  model,
+  scale = 1
+) {
+  const nodeIndices = [nBase, nCollector, nEmitter];
+  const terminalCurrents = [model.ib * scale, model.ic * scale, model.ie * scale];
+  const derivatives = [
+    [model.dIb_dVb * scale, model.dIb_dVc * scale, model.dIb_dVe * scale],
+    [model.dIc_dVb * scale, model.dIc_dVc * scale, model.dIc_dVe * scale],
+    [model.dIe_dVb * scale, model.dIe_dVc * scale, model.dIe_dVe * scale],
+  ];
+
+  for (let row = 0; row < nodeIndices.length; row += 1) {
+    const rowIndex = nodeIndices[row];
+    if (rowIndex < 0) continue;
+
+    residual[rowIndex] += terminalCurrents[row];
+
+    for (let col = 0; col < nodeIndices.length; col += 1) {
+      const colIndex = nodeIndices[col];
+      if (colIndex < 0) continue;
+      jacobian[rowIndex][colIndex] += derivatives[row][col];
+    }
+  }
 }
 
 function solveLinearSystem(matrix, vector) {
@@ -3370,6 +3935,15 @@ function terminalKey(componentId, terminalIndex) {
   return `${componentId}:${terminalIndex}`;
 }
 
+function parseTerminalKey(value) {
+  const [componentId, terminalIndex] = String(value).split(":").map(Number);
+  if (!Number.isFinite(componentId) || !Number.isFinite(terminalIndex)) {
+    return null;
+  }
+
+  return { componentId, terminalIndex };
+}
+
 function key(x, y) {
   return `${x},${y}`;
 }
@@ -3406,6 +3980,14 @@ function stepDirection(from, to) {
   return "up";
 }
 
+function oppositeDirection(direction) {
+  if (direction === "right") return "left";
+  if (direction === "left") return "right";
+  if (direction === "down") return "up";
+  if (direction === "up") return "down";
+  return null;
+}
+
 function manhattan(a, b) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
@@ -3436,9 +4018,12 @@ function safeOpAmpSupply(value) {
   return Math.max(1e-6, Math.abs(value));
 }
 
-function evaluateDiodeModel(component, voltage) {
-  const def = COMPONENT_DEFS[component?.type];
-  const model = def?.model || {};
+function safeBjtBeta(value) {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(1, value);
+}
+
+function evaluateJunctionModel(model, voltage) {
   const saturationCurrent = model.saturationCurrent ?? 1e-12;
   const idealityFactor = model.idealityFactor ?? 1;
   const thermalVoltage = model.thermalVoltage ?? 0.02585;
@@ -3450,6 +4035,96 @@ function evaluateDiodeModel(component, voltage) {
   return {
     current: saturationCurrent * (expTerm - 1) + gmin * voltage,
     conductance: (saturationCurrent / thermalFactor) * expTerm + gmin,
+  };
+}
+
+function evaluateDiodeModel(component, voltage) {
+  const def = COMPONENT_DEFS[component?.type];
+  return evaluateJunctionModel(def?.model || {}, voltage);
+}
+
+function evaluateForwardOnlyJunctionModel(model, voltage) {
+  if (voltage <= 0) {
+    return { current: 0, conductance: 0 };
+  }
+
+  return evaluateJunctionModel(model, voltage);
+}
+
+function evaluateBjtSaturationFactor(model, vce) {
+  const saturationVoltage = model.saturationVoltage ?? 0.15;
+  const saturationSharpness = Math.max(1e-4, model.saturationSharpness ?? 0.04);
+  const arg = clamp(
+    (vce - saturationVoltage) / saturationSharpness,
+    -MAX_BJT_SATURATION_ARG,
+    MAX_BJT_SATURATION_ARG
+  );
+  const factor = 1 / (1 + Math.exp(-arg));
+  return {
+    factor,
+    conductance: (factor * (1 - factor)) / saturationSharpness,
+  };
+}
+
+function evaluateBjtModel(component, vbe, vbc) {
+  const def = COMPONENT_DEFS[component?.type];
+  const model = def?.model || {};
+  const beta = safeBjtBeta(component?.value);
+  const baseJunctionModel = {
+    saturationCurrent: model.baseSaturationCurrent ?? 1e-14,
+    idealityFactor: model.idealityFactor ?? 1.2,
+    thermalVoltage: model.thermalVoltage ?? 0.02585,
+    gmin: model.gmin ?? 1e-9,
+  };
+  const collectorJunctionModel = {
+    saturationCurrent: model.collectorSaturationCurrent ?? 1e-14,
+    idealityFactor: model.idealityFactor ?? 1.2,
+    thermalVoltage: model.thermalVoltage ?? 0.02585,
+    gmin: 0,
+  };
+  const collectorEmitterConductance = model.collectorEmitterConductance ?? 1e-9;
+  const baseDiode = evaluateJunctionModel(baseJunctionModel, vbe);
+  const baseTransport = evaluateForwardOnlyJunctionModel(
+    { ...baseJunctionModel, gmin: 0 },
+    vbe
+  );
+  // BC only contributes when directly polarized to avoid self-biasing an open base.
+  const collectorDiode = evaluateForwardOnlyJunctionModel(collectorJunctionModel, vbc);
+  const vce = vbe - vbc;
+  const saturation = evaluateBjtSaturationFactor(model, vce);
+  const controlledCollectorCurrent = beta * baseTransport.current * saturation.factor;
+  const collectorEmitterLeakage = collectorEmitterConductance * vce;
+
+  const ic = controlledCollectorCurrent - collectorDiode.current + collectorEmitterLeakage;
+  const ib = baseDiode.current + collectorDiode.current;
+  const ie = -(ic + ib);
+
+  const dIc_dVb = beta * baseTransport.conductance * saturation.factor - collectorDiode.conductance;
+  const dIc_dVc =
+    beta * baseTransport.current * saturation.conductance +
+    collectorDiode.conductance +
+    collectorEmitterConductance;
+  const dIc_dVe =
+    -beta * baseTransport.conductance * saturation.factor -
+    beta * baseTransport.current * saturation.conductance -
+    collectorEmitterConductance;
+  const dIb_dVb = baseDiode.conductance + collectorDiode.conductance;
+  const dIb_dVc = -collectorDiode.conductance;
+  const dIb_dVe = -baseDiode.conductance;
+
+  return {
+    ib,
+    ic,
+    ie,
+    dIb_dVb,
+    dIb_dVc,
+    dIb_dVe,
+    dIc_dVb,
+    dIc_dVc,
+    dIc_dVe,
+    dIe_dVb: -(dIc_dVb + dIb_dVb),
+    dIe_dVc: -(dIc_dVc + dIb_dVc),
+    dIe_dVe: -(dIc_dVe + dIb_dVe),
   };
 }
 
@@ -3507,6 +4182,9 @@ function formatComponentValue(component) {
   if (component.type === "op_amp") {
     return formatSymmetricVoltage(component.value);
   }
+  if (component.type === "bjt_npn") {
+    return `β=${Math.round(component.value)}`;
+  }
   return "";
 }
 
@@ -3535,8 +4213,31 @@ function formatResistance(value) {
   return `${roundTo(value, 2)} Ω`;
 }
 
+function formatEngineeringValue(value, unit, decimals = 2) {
+  if (!Number.isFinite(value) || value === 0) {
+    return `0 ${unit}`;
+  }
+
+  const prefixes = new Map([
+    [-12, "p"],
+    [-9, "n"],
+    [-6, "µ"],
+    [-3, "m"],
+    [0, ""],
+    [3, "k"],
+    [6, "M"],
+    [9, "G"],
+    [12, "T"],
+  ]);
+  const abs = Math.abs(value);
+  const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
+  const exponent = clamp(rawExponent, -12, 12);
+  const scaled = value / Math.pow(10, exponent);
+  return `${roundTo(scaled, decimals)} ${prefixes.get(exponent)}${unit}`;
+}
+
 function formatVoltage(value) {
-  return `${roundTo(value, 3)} V`;
+  return formatEngineeringValue(value, "V");
 }
 
 function formatSymmetricVoltage(value) {
@@ -3544,10 +4245,7 @@ function formatSymmetricVoltage(value) {
 }
 
 function formatCurrent(value) {
-  const abs = Math.abs(value);
-  if (abs >= 1) return `${roundTo(value, 3)} A`;
-  if (abs >= 1e-3) return `${roundTo(value * 1e3, 3)} mA`;
-  return `${roundTo(value * 1e6, 2)} µA`;
+  return formatEngineeringValue(value, "A");
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -3639,6 +4337,21 @@ function buildSvgForType(type, options = {}) {
         <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
         <polygon points="42,16 42,64 100,40" fill="#e2e8f0"/>
         <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
+      </g>
+    </svg>`;
+  }
+
+  if (type === "bjt_npn") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <line x1="0" y1="80" x2="50" y2="80"/>
+        <line x1="50" y1="48" x2="50" y2="112"/>
+        <line x1="50" y1="80" x2="80" y2="48"/>
+        <line x1="80" y1="48" x2="80" y2="0"/>
+        <line x1="50" y1="80" x2="80" y2="112"/>
+        <line x1="80" y1="112" x2="80" y2="160"/>
+        <line x1="66" y1="112" x2="80" y2="112"/>
+        <line x1="80" y1="98" x2="80" y2="112"/>
       </g>
     </svg>`;
   }
