@@ -31,6 +31,8 @@ const OCCUPIED_WIRE_EDGE_PENALTY = 40;
 const NODE_PROXIMITY_PENALTY = 18;
 const TURN_PENALTY = 3;
 const TERMINAL_DIRECTION_MISMATCH_PENALTY = 0.75;
+const MOUSE_TERMINAL_HIT_RADIUS = 0.48;
+const TOUCH_TERMINAL_HIT_RADIUS = 0.78;
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -777,7 +779,7 @@ function setupCanvasGestures() {
   appEls.canvas.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
     const point = clientToWorld(event.clientX, event.clientY);
-    const terminalHit = pickTerminal(point.x, point.y, 0.48);
+    const terminalHit = pickTerminal(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS);
     if (terminalHit) {
       handleTerminalTap(terminalHit.componentId, terminalHit.terminalIndex);
       return;
@@ -1397,7 +1399,7 @@ function drawCurrentArrow(component, current) {
 function startSingleTouch(touch) {
   const point = clientToWorld(touch.clientX, touch.clientY);
 
-  const terminalHit = pickTerminal(point.x, point.y, 0.5);
+  const terminalHit = pickTerminal(point.x, point.y, TOUCH_TERMINAL_HIT_RADIUS);
   if (terminalHit) {
     handleTerminalTap(terminalHit.componentId, terminalHit.terminalIndex);
     state.pointer.mode = "none";
