@@ -38,6 +38,8 @@ const DOUBLE_TAP_MAX_DELAY_MS = 320;
 const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
 const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
 const DELETE_BUTTON_HOLD_MS = 2000;
+const EXPORT_FILENAME_PREFIX = "circuito";
+const EXPORT_TRIM_PADDING_PX = 12;
 const SIMULATION_BUTTON_ICONS = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10-6.5z"/></svg>',
   running:
@@ -517,6 +519,7 @@ const appEls = {
   canvasWrap: document.getElementById("canvas-wrap"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
+  exportBtn: document.getElementById("export-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
   deleteBtn: document.getElementById("delete-btn"),
   swapOpAmpBtn: document.getElementById("swap-op-amp-btn"),
@@ -527,7 +530,7 @@ const appEls = {
   wheelTitle: document.getElementById("wheel-title"),
 };
 
-const ctx = appEls.canvas.getContext("2d");
+let ctx = appEls.canvas.getContext("2d");
 let dpr = Math.max(1, window.devicePixelRatio || 1);
 let lastCanvasW = 0;
 let lastCanvasH = 0;
@@ -567,6 +570,7 @@ setupWheelGestures();
 setupNativeZoomGuards();
 setupServiceWorker();
 setupRenderLoop();
+updateSelectionUi();
 
 function loadSprites() {
   const sprites = {};
@@ -692,6 +696,7 @@ function setupButtons() {
   });
 
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
+  appEls.exportBtn.addEventListener("click", handleExportAction);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const result = rotateComponentInCircuit(state, state.selectedComponentId);
@@ -730,6 +735,184 @@ function setSimulationButtonState(isRunning) {
   appEls.simulateBtn.title = isRunning ? "Pausar simulacao" : "Iniciar simulacao";
   appEls.simulateBtn.setAttribute("aria-label", isRunning ? "Pausar simulacao" : "Iniciar simulacao");
   appEls.simulateBtn.setAttribute("aria-pressed", isRunning ? "true" : "false");
+}
+
+async function handleExportAction() {
+  if (state.components.length === 0) {
+    showStatus("Adicione um componente para exportar", true);
+    return;
+  }
+
+  try {
+    const blob = await exportCircuitBlob();
+    const fileName = buildExportFileName();
+    if (await tryShareExport(blob, fileName)) {
+      showStatus("PNG pronto para compartilhar");
+      return;
+    }
+
+    downloadBlob(blob, fileName);
+    showStatus("PNG exportado");
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return;
+    }
+    showStatus("Falha ao exportar PNG", true);
+  }
+}
+
+async function exportCircuitBlob() {
+  const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
+  const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
+  const exportDpr = Math.max(1, window.devicePixelRatio || 1);
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = Math.max(1, Math.floor(width * exportDpr));
+  exportCanvas.height = Math.max(1, Math.floor(height * exportDpr));
+
+  const exportCtx = exportCanvas.getContext("2d");
+  if (!exportCtx) {
+    throw new Error("export context unavailable");
+  }
+
+  const previousCtx = ctx;
+  const previousDpr = dpr;
+
+  ctx = exportCtx;
+  dpr = exportDpr;
+
+  try {
+    drawScene({
+      background: "transparent",
+      showGrid: false,
+      showSelection: false,
+      showPendingTerminal: false,
+    });
+  } finally {
+    ctx = previousCtx;
+    dpr = previousDpr;
+  }
+
+  const trimmedCanvas = trimCanvas(exportCanvas, Math.ceil(exportDpr * EXPORT_TRIM_PADDING_PX));
+  return canvasToBlob(trimmedCanvas, "image/png");
+}
+
+function canvasToBlob(canvas, type) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+
+      reject(new Error("blob export failed"));
+    }, type);
+  });
+}
+
+async function tryShareExport(blob, fileName) {
+  const isMobile = window.matchMedia?.("(pointer: coarse)").matches;
+  if (!isMobile || !navigator.share || typeof File === "undefined") {
+    return false;
+  }
+
+  try {
+    const file = new File([blob], fileName, { type: "image/png" });
+    if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+      return false;
+    }
+
+    await navigator.share({
+      files: [file],
+      title: "Circuito",
+    });
+    return true;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw error;
+    }
+    return false;
+  }
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+function buildExportFileName() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  return `${EXPORT_FILENAME_PREFIX}-${year}${month}${day}-${hours}${minutes}${seconds}.png`;
+}
+
+function trimCanvas(sourceCanvas, paddingPx = 0) {
+  const sourceCtx = sourceCanvas.getContext("2d");
+  if (!sourceCtx) {
+    return sourceCanvas;
+  }
+
+  const { width, height } = sourceCanvas;
+  const imageData = sourceCtx.getImageData(0, 0, width, height);
+  const { data } = imageData;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha === 0) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return sourceCanvas;
+  }
+
+  const left = Math.max(0, minX - paddingPx);
+  const top = Math.max(0, minY - paddingPx);
+  const right = Math.min(width - 1, maxX + paddingPx);
+  const bottom = Math.min(height - 1, maxY + paddingPx);
+  const trimmedCanvas = document.createElement("canvas");
+  trimmedCanvas.width = right - left + 1;
+  trimmedCanvas.height = bottom - top + 1;
+
+  const trimmedCtx = trimmedCanvas.getContext("2d");
+  if (!trimmedCtx) {
+    return sourceCanvas;
+  }
+
+  trimmedCtx.drawImage(
+    sourceCanvas,
+    left,
+    top,
+    trimmedCanvas.width,
+    trimmedCanvas.height,
+    0,
+    0,
+    trimmedCanvas.width,
+    trimmedCanvas.height
+  );
+
+  return trimmedCanvas;
 }
 
 function setupDeleteButtonGestures() {
@@ -1325,18 +1508,32 @@ function renderLoop() {
   scheduleRender(false);
 }
 
-function drawScene() {
+function drawScene(options = {}) {
   const width = appEls.canvas.clientWidth;
   const height = appEls.canvas.clientHeight;
+  const {
+    background = "clear",
+    showGrid = true,
+    showSelection = true,
+    showPendingTerminal = true,
+  } = options;
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  drawGrid(width, height);
-  drawWires();
-  drawComponents();
+  if (background === "white") {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+  }
 
-  if (state.pendingTerminal) {
+  if (showGrid) {
+    drawGrid(width, height);
+  }
+
+  drawWires(showSelection);
+  drawComponents(showSelection);
+
+  if (showPendingTerminal && state.pendingTerminal) {
     const terminal = getTerminalPosition(state.pendingTerminal.componentId, state.pendingTerminal.terminalIndex);
     if (terminal) {
       const sp = worldToScreen(terminal.x, terminal.y);
@@ -1377,7 +1574,7 @@ function drawGrid(width, height) {
   }
 }
 
-function drawWires() {
+function drawWires(showSelection = true) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
@@ -1394,14 +1591,14 @@ function drawWires() {
       }
     });
 
-    const isSelected = state.selectedWireId === wire.id;
+    const isSelected = showSelection && state.selectedWireId === wire.id;
     ctx.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
     ctx.strokeStyle = isSelected ? "#ea580c" : "#0f172a";
     ctx.stroke();
   }
 }
 
-function drawComponents() {
+function drawComponents(showSelection = true) {
   for (const component of state.components) {
     const def = COMPONENT_DEFS[component.type];
     const behavior = getComponentBehavior(component.type);
@@ -1426,7 +1623,7 @@ function drawComponents() {
 
     behavior.drawSpriteOverlay(component);
 
-    if (state.selectedComponentId === component.id) {
+    if (showSelection && state.selectedComponentId === component.id) {
       ctx.strokeStyle = "#0ea5a8";
       ctx.lineWidth = 2;
       ctx.strokeRect(-width / 2 + renderOffsetX - 4, -height / 2 + renderOffsetY - 4, width + 8, height + 8);
@@ -1441,6 +1638,7 @@ function drawComponents() {
       const sp = worldToScreen(tp.x, tp.y);
       const connected = isTerminalConnected(component.id, i);
       const isPending =
+        showSelection &&
         state.pendingTerminal &&
         state.pendingTerminal.componentId === component.id &&
         state.pendingTerminal.terminalIndex === i;
@@ -3203,10 +3401,12 @@ function updateSelectionUi() {
 
   const component = getComponentById(state.selectedComponentId);
   const wire = getWireById(state.selectedWireId);
+  const canExport = state.components.length > 0;
 
   if (!component && !wire) {
     clearDeleteButtonHold();
     deleteButtonHoldState.suppressNextClick = false;
+    appEls.exportBtn.classList.toggle("hidden", !canExport);
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
     appEls.swapOpAmpBtn.classList.add("hidden");
@@ -3214,6 +3414,7 @@ function updateSelectionUi() {
     return;
   }
 
+  appEls.exportBtn.classList.add("hidden");
   appEls.deleteBtn.classList.remove("hidden");
 
   if (!component) {
