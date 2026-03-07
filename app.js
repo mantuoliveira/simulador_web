@@ -3,6 +3,7 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 3.2;
 const IDLE_FPS = 1;
 const IDLE_FRAME_MS = 1000 / IDLE_FPS;
+const MOBILE_INITIAL_ZOOM = 0.8;
 const NEWTON_MAX_ITERATIONS = 40;
 const NEWTON_KCL_RESIDUAL_TOLERANCE = 1e-12;
 const NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE = 1e-8;
@@ -467,6 +468,14 @@ function getComponentBehavior(type) {
   return COMPONENT_DEFS[type]?.behavior || DEFAULT_COMPONENT_BEHAVIOR;
 }
 
+function getInitialCameraZoom() {
+  if (window.matchMedia?.("(pointer: coarse)").matches) {
+    return MOBILE_INITIAL_ZOOM;
+  }
+
+  return 1;
+}
+
 const state = {
   components: [],
   wires: [],
@@ -481,7 +490,7 @@ const state = {
   camera: {
     offsetX: 0,
     offsetY: 0,
-    zoom: 1,
+    zoom: getInitialCameraZoom(),
   },
   pointer: {
     mode: "none",
