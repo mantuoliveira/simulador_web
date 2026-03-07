@@ -154,11 +154,11 @@ body {
   z-index: 20;
 }
 
-#bottom-actions {
-  grid-column: 2;
+#left-actions {
+  grid-column: 1;
+  justify-self: start;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 12px;
 }
 
@@ -240,8 +240,6 @@ button.secondary.danger {
 }
 
 #delete-btn {
-  grid-column: 1;
-  justify-self: start;
   min-width: 58px;
   width: 58px;
   min-height: 58px;

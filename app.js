@@ -43,6 +43,12 @@ const SIMULATION_BUTTON_ICONS = {
   running:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>',
 };
+const CURRENT_ARROW_BUTTON_ICONS = {
+  visible:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 5c-5.85 0-9.64 5.22-10 5.78L1.5 12l.5 1.22C2.36 13.78 6.15 19 12 19s9.64-5.22 10-5.78l.5-1.22-.5-1.22C21.64 10.22 17.85 5 12 5zm0 11c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm0-6.2A2.2 2.2 0 1 0 12 14.2a2.2 2.2 0 0 0 0-4.4z"/></svg>',
+  hidden:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.27 2 2 3.27l3 3C2.92 7.9 1.52 9.84 1 10.78L.5 12l.5 1.22C1.36 13.78 5.15 19 11 19c2.03 0 3.83-.63 5.38-1.53L20.73 22 22 20.73 3.27 2zM12 16c-2.21 0-4-1.79-4-4 0-.53.1-1.03.29-1.49l5.2 5.2c-.46.19-.96.29-1.49.29zm10.5-4-.5 1.22c-.3.73-1.64 3-3.92 4.8l-1.45-1.45C18.09 15.32 19.3 13.6 19.7 13l.3-.46-.3-.46C19.34 11.53 16.31 7 12 7c-.84 0-1.64.11-2.39.31L8.02 5.72C9.25 5.26 10.57 5 12 5c5.85 0 9.64 5.22 10 5.78L22.5 12zm-6.43.54-4.61-4.61c.18-.02.36-.03.54-.03 2.21 0 4 1.79 4 4 0 .18-.01.36-.03.64z"/></svg>',
+};
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -522,6 +528,7 @@ const appEls = {
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
   exportBtn: document.getElementById("export-btn"),
+  currentArrowBtn: document.getElementById("current-arrow-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
   deleteBtn: document.getElementById("delete-btn"),
   swapOpAmpBtn: document.getElementById("swap-op-amp-btn"),
@@ -718,6 +725,7 @@ function setupButtons() {
       }
       state.simulationActive = true;
       setSimulationButtonState(true);
+      updateSelectionUi();
       showStatus("Simulação DC ativa");
       return;
     }
@@ -725,11 +733,13 @@ function setupButtons() {
     state.simulationActive = false;
     state.simulationResult = null;
     setSimulationButtonState(false);
+    updateSelectionUi();
     showStatus("Simulação pausada");
   });
 
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
   appEls.exportBtn.addEventListener("click", handleExportAction);
+  appEls.currentArrowBtn.addEventListener("click", toggleSelectedComponentCurrentArrow);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const result = rotateComponentInCircuit(state, state.selectedComponentId);
@@ -771,6 +781,31 @@ function setSimulationButtonState(isRunning) {
   appEls.simulateBtn.title = isRunning ? "Pausar simulacao" : "Iniciar simulacao";
   appEls.simulateBtn.setAttribute("aria-label", isRunning ? "Pausar simulacao" : "Iniciar simulacao");
   appEls.simulateBtn.setAttribute("aria-pressed", isRunning ? "true" : "false");
+}
+
+function canToggleCurrentArrow(component) {
+  return !!component && isSimulatedBranchComponent(component.type) && component.type !== "ground";
+}
+
+function setCurrentArrowButtonState(component) {
+  const isHidden = component?.currentArrowHidden === true;
+  const label = isHidden ? "Mostrar seta de corrente" : "Ocultar seta de corrente";
+  appEls.currentArrowBtn.innerHTML = isHidden
+    ? CURRENT_ARROW_BUTTON_ICONS.hidden
+    : CURRENT_ARROW_BUTTON_ICONS.visible;
+  appEls.currentArrowBtn.title = label;
+  appEls.currentArrowBtn.setAttribute("aria-label", label);
+  appEls.currentArrowBtn.setAttribute("aria-pressed", isHidden ? "true" : "false");
+}
+
+function toggleSelectedComponentCurrentArrow() {
+  const component = getComponentById(state.selectedComponentId);
+  if (!canToggleCurrentArrow(component)) return;
+
+  component.currentArrowHidden = component.currentArrowHidden !== true;
+  setCurrentArrowButtonState(component);
+  requestRender(true);
+  showStatus(component.currentArrowHidden ? "Seta de corrente oculta" : "Seta de corrente visível");
 }
 
 function setupDeleteButtonGestures() {
@@ -1645,7 +1680,7 @@ function drawSimulationAnnotations(renderTarget, data) {
 
   for (const component of state.components) {
     const current = data.componentCurrents.get(component.id);
-    if (current == null || component.type === "ground") continue;
+    if (current == null || component.type === "ground" || component.currentArrowHidden === true) continue;
     drawCurrentArrow(renderTarget, component, current);
   }
 }
@@ -3224,6 +3259,7 @@ function updateSelectionUi() {
     clearDeleteButtonHold();
     deleteButtonHoldState.suppressNextClick = false;
     appEls.exportBtn.classList.toggle("hidden", !canExport);
+    appEls.currentArrowBtn.classList.add("hidden");
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
     appEls.swapOpAmpBtn.classList.add("hidden");
@@ -3235,10 +3271,18 @@ function updateSelectionUi() {
   appEls.deleteBtn.classList.remove("hidden");
 
   if (!component) {
+    appEls.currentArrowBtn.classList.add("hidden");
     appEls.rotateBtn.classList.add("hidden");
     appEls.swapOpAmpBtn.classList.add("hidden");
     appEls.valueWheel.classList.add("hidden");
     return;
+  }
+
+  if (state.simulationActive && canToggleCurrentArrow(component)) {
+    setCurrentArrowButtonState(component);
+    appEls.currentArrowBtn.classList.remove("hidden");
+  } else {
+    appEls.currentArrowBtn.classList.add("hidden");
   }
 
   appEls.rotateBtn.classList.remove("hidden");
@@ -3460,6 +3504,7 @@ function onCircuitChanged() {
       state.simulationActive = false;
       state.simulationResult = null;
       setSimulationButtonState(false);
+      updateSelectionUi();
       showStatus(result.message || "Erro na simulação", true);
     }
   }
