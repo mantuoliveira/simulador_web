@@ -1737,8 +1737,8 @@ function drawOpAmpMarkerAt(context, x, y, halfSpan, isPlus) {
 function drawVoltageSourcePolarityMarkers(renderTarget, component) {
   const { context } = renderTarget;
   const rotationRad = degToRad(component.rotation);
-  const offset = worldLengthToScreen(0.35);
-  const halfSpan = Math.max(6, worldLengthToScreen(0.22));
+  const offset = Math.max(4.5, worldLengthToScreen(0.35));
+  const halfSpan = Math.max(3, worldLengthToScreen(0.2));
   const cos = Math.cos(rotationRad);
   const sin = Math.sin(rotationRad);
   const minusCenterX = -offset * cos;
@@ -1749,7 +1749,7 @@ function drawVoltageSourcePolarityMarkers(renderTarget, component) {
   context.save();
   context.rotate(-rotationRad);
   context.strokeStyle = "#0f172a";
-  context.lineWidth = Math.max(4.2, state.camera.zoom * 4.2);
+  context.lineWidth = Math.max(2, worldLengthToScreen(0.15));
   context.lineCap = "round";
 
   context.beginPath();
