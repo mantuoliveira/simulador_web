@@ -35,6 +35,10 @@ http://SEU_IP_LOCAL:8080/index.html
 - Ícones dos componentes em SVG.
 - Grade por pontos no canvas.
 - Roteamento ortogonal (90°) alinhado à grade para fios.
+- Criação de junções ao conectar componentes em qualquer ponto de um fio.
+- Roteamento evita sobreposição paralela de segmentos já ocupados por outros fios.
+- Roteamento evita passar colado em nós alheios quando isso pode sugerir conexão falsa.
+- Roteamento penaliza curvas desnecessárias para preferir caminhos mais retos.
 - Tentativa de evitar travessia de fios por dentro de componentes.
 - Solver DC por Análise Nodal Modificada (MNA).
 - Diodo DC com modelo não linear tipo Shockley resolvido por Newton-Raphson.
