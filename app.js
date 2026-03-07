@@ -5,11 +5,19 @@ const IDLE_FPS = 1;
 const IDLE_FRAME_MS = 1000 / IDLE_FPS;
 const NEWTON_MAX_ITERATIONS = 40;
 const NEWTON_RESIDUAL_TOLERANCE = 1e-8;
-const NEWTON_STEP_TOLERANCE = 1e-8;
+const NEWTON_STEP_TOLERANCE = 1e-12;
 const NEWTON_BACKTRACK_STEPS = 14;
 const NEWTON_SOURCE_STEPS = 20;
 const MAX_DIODE_EXP_ARG = 40;
 const MAX_DIODE_VOLTAGE_STEP = 0.03;
+const OP_AMP_OPEN_LOOP_GAIN = 200000;
+const OP_AMP_MIN_SUPPLY = 1;
+const OP_AMP_MAX_SUPPLY = 24;
+const OP_AMP_SUPPLY_STEP = 0.5;
+const MAX_OP_AMP_TANH_ARG = 18;
+const OP_AMP_TOP_INPUT_TERMINAL_INDEX = 0;
+const OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX = 1;
+const OP_AMP_OUTPUT_TERMINAL_INDEX = 2;
 const OCCUPIED_WIRE_EDGE_PENALTY = 40;
 const NODE_PROXIMITY_PENALTY = 18;
 const TURN_PENALTY = 3;
@@ -93,6 +101,35 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
   },
+  op_amp: {
+    label: "Amp Op",
+    terminals: [
+      [-2, -1],
+      [-2, 1],
+      [3, 0],
+    ],
+    bodyHalfW: 2.2,
+    bodyHalfH: 1.55,
+    renderW: 5,
+    renderH: 4,
+    renderOffsetX: 0.5,
+    defaultValue: 15,
+    editable: true,
+    showValueLabel: false,
+    unit: "V",
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [-1, 1],
+      [0, 1],
+    ],
+    footprintExtents: { left: 2.5, right: 3, up: 2.5, down: 2.5 },
+    footprintHalf: { x: 3, y: 2.5 },
+  },
   diode: {
     label: "Diodo",
     terminals: [
@@ -159,7 +196,7 @@ const COMPONENT_DEFS = {
   },
 };
 
-const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "diode", "ground"];
+const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "op_amp", "diode", "ground"];
 
 const state = {
   components: [],
@@ -198,8 +235,10 @@ const appEls = {
   strip: document.getElementById("component-strip"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
+  clearBtn: document.getElementById("clear-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
   deleteBtn: document.getElementById("delete-btn"),
+  swapOpAmpBtn: document.getElementById("swap-op-amp-btn"),
   status: document.getElementById("status-pill"),
   valueWheel: document.getElementById("value-wheel"),
   wheelPointer: document.querySelector(".wheel-pointer"),
@@ -239,7 +278,9 @@ setupRenderLoop();
 function loadSprites() {
   const sprites = {};
   for (const type of COMPONENT_ORDER) {
-    const svg = buildSvgForType(type);
+    const svg = buildSvgForType(type, {
+      showOpAmpMarkers: type !== "op_amp",
+    });
     const image = new Image();
     image.src = svgToDataUri(svg);
     sprites[type] = image;
@@ -323,6 +364,8 @@ function setupButtons() {
     showStatus("Simulação pausada");
   });
 
+  appEls.clearBtn.addEventListener("click", clearCircuit);
+  appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedOpAmpInputs);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const component = getComponentById(state.selectedComponentId);
@@ -347,6 +390,34 @@ function setupButtons() {
   });
 
   appEls.deleteBtn.addEventListener("click", handleDeleteAction);
+}
+
+function clearCircuit() {
+  state.components = [];
+  state.wires = [];
+  state.nextComponentId = 1;
+  state.nextWireId = 1;
+  state.nextSplitGroupId = 1;
+  state.selectedComponentId = null;
+  state.selectedWireId = null;
+  state.pendingTerminal = null;
+  state.simulationActive = false;
+  state.simulationResult = null;
+
+  appEls.simulateBtn.textContent = "Simular";
+  appEls.simulateBtn.classList.remove("running");
+  updateSelectionUi();
+  requestRender(true);
+  showStatus("Canvas limpo");
+}
+
+function toggleSelectedOpAmpInputs() {
+  const component = getComponentById(state.selectedComponentId);
+  if (!component || component.type !== "op_amp") return;
+
+  component.inputsSwapped = !component.inputsSwapped;
+  onCircuitChanged();
+  showStatus("Entradas do amp op trocadas");
 }
 
 function ensureGroundForSimulation() {
@@ -473,17 +544,17 @@ function buildAutoGroundCandidates(targetPosition) {
     const keyValue = `${x},${y},${rotation}`;
     if (seen.has(keyValue)) return;
 
-    const footprint = getFootprintHalf({ type: "ground", rotation });
+    const footprint = getFootprintExtents({ type: "ground", rotation });
     const minX = visible.minX - searchMargin;
     const maxX = visible.maxX + searchMargin;
     const minY = visible.minY - searchMargin;
     const maxY = visible.maxY + searchMargin;
 
     if (
-      x - footprint.x < minX ||
-      x + footprint.x > maxX ||
-      y - footprint.y < minY ||
-      y + footprint.y > maxY
+      x - footprint.left < minX ||
+      x + footprint.right > maxX ||
+      y - footprint.up < minY ||
+      y + footprint.down > maxY
     ) {
       return;
     }
@@ -933,22 +1004,28 @@ function drawComponents() {
     const center = worldToScreen(component.x, component.y);
     const width = worldLengthToScreen(def.renderW);
     const height = worldLengthToScreen(def.renderH);
+    const renderOffsetX = worldLengthToScreen(def.renderOffsetX || 0);
+    const renderOffsetY = worldLengthToScreen(def.renderOffsetY || 0);
 
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(degToRad(component.rotation));
 
     if (sprite?.complete) {
-      ctx.drawImage(sprite, -width / 2, -height / 2, width, height);
+      ctx.drawImage(sprite, -width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
     } else if (width > 0 && height > 0) {
       ctx.fillStyle = "#dbe4ef";
-      ctx.fillRect(-width / 2, -height / 2, width, height);
+      ctx.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
+    }
+
+    if (component.type === "op_amp") {
+      drawOpAmpInputMarkers(component);
     }
 
     if (state.selectedComponentId === component.id) {
       ctx.strokeStyle = "#0ea5a8";
       ctx.lineWidth = 2;
-      ctx.strokeRect(-width / 2 - 4, -height / 2 - 4, width + 8, height + 8);
+      ctx.strokeRect(-width / 2 + renderOffsetX - 4, -height / 2 + renderOffsetY - 4, width + 8, height + 8);
     }
 
     ctx.restore();
@@ -975,7 +1052,7 @@ function drawComponents() {
       ctx.stroke();
     }
 
-    if (def.editable) {
+    if (def.editable && def.showValueLabel !== false) {
       const labelPoint = getValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = formatComponentValue(component);
@@ -986,6 +1063,46 @@ function drawComponents() {
       ctx.fillText(valueText, screenPoint.x, screenPoint.y);
     }
   }
+}
+
+function drawOpAmpInputMarkers(component) {
+  const def = COMPONENT_DEFS.op_amp;
+  const { plusIndex, minusIndex } = getOpAmpInputTerminalIndices(component);
+  const plusBase = def.terminals[plusIndex];
+  const minusBase = def.terminals[minusIndex];
+  if (!plusBase || !minusBase) return;
+
+  const markerOffsetX = 1.25;
+  const halfSpan = Math.max(4.8, worldLengthToScreen(0.18));
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(2.2, state.camera.zoom * 2.2);
+  ctx.lineCap = "round";
+
+  drawOpAmpMarkerAt(
+    worldLengthToScreen(plusBase[0] + markerOffsetX),
+    worldLengthToScreen(plusBase[1]),
+    halfSpan,
+    true
+  );
+  drawOpAmpMarkerAt(
+    worldLengthToScreen(minusBase[0] + markerOffsetX),
+    worldLengthToScreen(minusBase[1]),
+    halfSpan,
+    false
+  );
+}
+
+function drawOpAmpMarkerAt(x, y, halfSpan, isPlus) {
+  ctx.beginPath();
+  ctx.moveTo(x - halfSpan, y);
+  ctx.lineTo(x + halfSpan, y);
+
+  if (isPlus) {
+    ctx.moveTo(x, y - halfSpan);
+    ctx.lineTo(x, y + halfSpan);
+  }
+
+  ctx.stroke();
 }
 
 function drawSimulationAnnotations(data) {
@@ -1115,10 +1232,17 @@ function drawCurrentArrow(component, current) {
   ctx.fill();
 
   const text = formatCurrent(signed);
-  const textOffset = Math.max(12, state.camera.zoom * 13);
+  ctx.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
+  let textOffset = Math.max(12, state.camera.zoom * 13);
+  if (component.type === "resistor" && Math.abs(dirY) > Math.abs(dirX)) {
+    textOffset += Math.max(10, state.camera.zoom * 12);
+  }
+  if (component.type === "current_source" && Math.abs(dirY) > Math.abs(dirX)) {
+    textOffset += Math.max(12, state.camera.zoom * 14);
+  }
+
   const textX = (s.x + e.x) * 0.5 + sideNormalX * textOffset;
   const textY = (s.y + e.y) * 0.5 + sideNormalY * textOffset;
-  ctx.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
   ctx.fillStyle = "#7f1d1d";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -1428,6 +1552,7 @@ function addComponent(type) {
     y: spot.y,
     rotation: 0,
     value: def.defaultValue,
+    ...(type === "op_amp" ? { inputsSwapped: false } : {}),
   };
 
   state.components.push(component);
@@ -1543,11 +1668,12 @@ function findEmptySpot(type) {
   const center = screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
   const visible = getVisibleWorldBounds();
   const margin = 1;
+  const footprint = getFootprintExtents({ type, rotation: 0 });
 
-  const minX = Math.ceil(visible.minX + def.footprintHalf.x + margin);
-  const maxX = Math.floor(visible.maxX - def.footprintHalf.x - margin);
-  const minY = Math.ceil(visible.minY + def.footprintHalf.y + margin);
-  const maxY = Math.floor(visible.maxY - def.footprintHalf.y - margin);
+  const minX = Math.ceil(visible.minX + footprint.left + margin);
+  const maxX = Math.floor(visible.maxX - footprint.right - margin);
+  const minY = Math.ceil(visible.minY + footprint.up + margin);
+  const maxY = Math.floor(visible.maxY - footprint.down - margin);
 
   if (minX > maxX || minY > maxY) return null;
 
@@ -1648,22 +1774,67 @@ function isComponentPlacementValid(candidate, ignoreId = null, padding = 0) {
 }
 
 function componentsOverlap(a, b, padding = 0) {
-  const fa = getFootprintHalf(a);
-  const fb = getFootprintHalf(b);
-  const dx = Math.abs(a.x - b.x);
-  const dy = Math.abs(a.y - b.y);
+  const fa = getFootprintExtents(a);
+  const fb = getFootprintExtents(b);
 
-  return dx < fa.x + fb.x + padding && dy < fa.y + fb.y + padding;
+  const aLeft = a.x - fa.left;
+  const aRight = a.x + fa.right;
+  const aTop = a.y - fa.up;
+  const aBottom = a.y + fa.down;
+
+  const bLeft = b.x - fb.left;
+  const bRight = b.x + fb.right;
+  const bTop = b.y - fb.up;
+  const bBottom = b.y + fb.down;
+
+  return (
+    aLeft < bRight + padding &&
+    aRight + padding > bLeft &&
+    aTop < bBottom + padding &&
+    aBottom + padding > bTop
+  );
 }
 
-function getFootprintHalf(component) {
+function getFootprintExtents(component) {
   const def = COMPONENT_DEFS[component.type];
-  if (!def) return { x: 1, y: 1 };
+  if (!def) return { left: 1, right: 1, up: 1, down: 1 };
+
+  const extents = def.footprintExtents || {
+    left: def.footprintHalf.x,
+    right: def.footprintHalf.x,
+    up: def.footprintHalf.y,
+    down: def.footprintHalf.y,
+  };
   const rotation = normalizeRotation(component.rotation);
-  if (rotation === 90 || rotation === 270) {
-    return { x: def.footprintHalf.y, y: def.footprintHalf.x };
+
+  if (rotation === 90) {
+    return {
+      left: extents.down,
+      right: extents.up,
+      up: extents.left,
+      down: extents.right,
+    };
   }
-  return def.footprintHalf;
+
+  if (rotation === 180) {
+    return {
+      left: extents.right,
+      right: extents.left,
+      up: extents.down,
+      down: extents.up,
+    };
+  }
+
+  if (rotation === 270) {
+    return {
+      left: extents.up,
+      right: extents.down,
+      up: extents.right,
+      down: extents.left,
+    };
+  }
+
+  return extents;
 }
 
 function rerouteConnectedWires(componentId) {
@@ -1712,11 +1883,11 @@ function routeBounds(start, end) {
   let maxY = Math.max(start.y, end.y);
 
   for (const component of state.components) {
-    const fp = getFootprintHalf(component);
-    minX = Math.min(minX, Math.floor(component.x - fp.x - 2));
-    maxX = Math.max(maxX, Math.ceil(component.x + fp.x + 2));
-    minY = Math.min(minY, Math.floor(component.y - fp.y - 2));
-    maxY = Math.max(maxY, Math.ceil(component.y + fp.y + 2));
+    const fp = getFootprintExtents(component);
+    minX = Math.min(minX, Math.floor(component.x - fp.left - 2));
+    maxX = Math.max(maxX, Math.ceil(component.x + fp.right + 2));
+    minY = Math.min(minY, Math.floor(component.y - fp.up - 2));
+    maxY = Math.max(maxY, Math.ceil(component.y + fp.down + 2));
   }
 
   const pad = 10;
@@ -2236,8 +2407,13 @@ function isSimulatedBranchComponent(type) {
     type === "voltage_source" ||
     type === "current_source" ||
     type === "resistor" ||
-    type === "diode"
+    type === "diode" ||
+    type === "op_amp"
   );
+}
+
+function createsReachabilityEdge(type) {
+  return type !== "op_amp" && isSimulatedBranchComponent(type);
 }
 
 function updateSelectionUi() {
@@ -2249,6 +2425,7 @@ function updateSelectionUi() {
   if (!component && !wire) {
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
+    appEls.swapOpAmpBtn.classList.add("hidden");
     appEls.valueWheel.classList.add("hidden");
     return;
   }
@@ -2257,11 +2434,17 @@ function updateSelectionUi() {
 
   if (!component) {
     appEls.rotateBtn.classList.add("hidden");
+    appEls.swapOpAmpBtn.classList.add("hidden");
     appEls.valueWheel.classList.add("hidden");
     return;
   }
 
   appEls.rotateBtn.classList.remove("hidden");
+  if (component.type === "op_amp") {
+    appEls.swapOpAmpBtn.classList.remove("hidden");
+  } else {
+    appEls.swapOpAmpBtn.classList.add("hidden");
+  }
 
   const def = COMPONENT_DEFS[component.type];
   if (!def.editable) {
@@ -2320,6 +2503,10 @@ function valueFromNormalized(type, normalized) {
     return snapToStep((-0.1 + 0.2 * n), 0.001);
   }
 
+  if (type === "op_amp") {
+    return snapToStep(OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * n, OP_AMP_SUPPLY_STEP);
+  }
+
   return 0;
 }
 
@@ -2338,6 +2525,11 @@ function normalizedFromValue(component) {
 
   if (component.type === "current_source") {
     return clamp((value + 0.1) / 0.2, 0, 1);
+  }
+
+  if (component.type === "op_amp") {
+    const safe = clamp(Math.abs(value), OP_AMP_MIN_SUPPLY, OP_AMP_MAX_SUPPLY);
+    return clamp((safe - OP_AMP_MIN_SUPPLY) / (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY), 0, 1);
   }
 
   return 0;
@@ -2376,6 +2568,19 @@ function getTerminalPosition(componentId, terminalIndex) {
   };
 }
 
+function getOpAmpInputTerminalIndices(component) {
+  const inputsSwapped = component?.inputsSwapped === true;
+  return inputsSwapped
+    ? {
+        plusIndex: OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
+        minusIndex: OP_AMP_TOP_INPUT_TERMINAL_INDEX,
+      }
+    : {
+        plusIndex: OP_AMP_TOP_INPUT_TERMINAL_INDEX,
+        minusIndex: OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
+      };
+}
+
 function isTerminalConnected(componentId, terminalIndex) {
   return state.wires.some(
     (wire) =>
@@ -2396,7 +2601,14 @@ function getWireById(id) {
 
 function getValueLabelAnchor(component) {
   const rotation = normalizeRotation(component.rotation);
-  const offset = 1.62;
+  let offset = 1.62;
+  if (component.type === "op_amp") {
+    offset = 2.2;
+  } else if (component.type === "current_source") {
+    offset = 2.05;
+  } else if (component.type === "voltage_source") {
+    offset = 1.62;
+  }
 
   if (rotation === 0) return { x: component.x, y: component.y - offset };
   if (rotation === 90) return { x: component.x + offset, y: component.y };
@@ -2457,7 +2669,7 @@ function runSimulation() {
   }
 
   for (const component of state.components) {
-    if (!isSimulatedBranchComponent(component.type)) continue;
+    if (!createsReachabilityEdge(component.type)) continue;
     const t0 = terminalKey(component.id, 0);
     const t1 = terminalKey(component.id, 1);
     const n0 = rootByTerminal.get(t0);
@@ -2484,10 +2696,9 @@ function runSimulation() {
 
   const activeComponents = state.components.filter((component) => {
     if (!isSimulatedBranchComponent(component.type)) return false;
-    const n0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const n1 = rootByTerminal.get(terminalKey(component.id, 1));
-    if (!n0 || !n1) return false;
-    return reachableNodes.has(n0) || reachableNodes.has(n1);
+    const terminalRoots = getComponentTerminalRoots(component, rootByTerminal);
+    if (terminalRoots.length === 0) return false;
+    return terminalRoots.some((root) => reachableNodes.has(root));
   });
 
   if (activeComponents.length === 0) {
@@ -2497,8 +2708,9 @@ function runSimulation() {
 
   const activeRoots = new Set();
   for (const component of activeComponents) {
-    activeRoots.add(rootByTerminal.get(terminalKey(component.id, 0)));
-    activeRoots.add(rootByTerminal.get(terminalKey(component.id, 1)));
+    for (const root of getComponentTerminalRoots(component, rootByTerminal)) {
+      activeRoots.add(root);
+    }
   }
 
   const nonGroundRoots = [...activeRoots].filter((root) => root !== groundRoot);
@@ -2506,10 +2718,12 @@ function runSimulation() {
 
   const voltageSources = activeComponents.filter((component) => component.type === "voltage_source");
   const diodes = activeComponents.filter((component) => component.type === "diode");
+  const opAmps = activeComponents.filter((component) => component.type === "op_amp");
 
   const N = nonGroundRoots.length;
   const M = voltageSources.length;
-  const size = N + M;
+  const O = opAmps.length;
+  const size = N + M + O;
 
   if (size === 0) {
     state.simulationResult = null;
@@ -2524,17 +2738,20 @@ function runSimulation() {
   const linearSystem = buildLinearMnaSystem(
     activeComponents,
     voltageSources,
+    opAmps,
     rootByTerminal,
     getNodeIdx,
     N
   );
 
   let solution = null;
-  if (diodes.length > 0) {
+  if (diodes.length > 0 || opAmps.length > 0) {
     solution = solveNonlinearCircuit({
       baseMatrix: linearSystem.A,
       baseVector: linearSystem.z,
       diodes,
+      opAmps,
+      opAmpRowOffset: N + M,
       rootByTerminal,
       getNodeIdx,
       previousSolution: state.simulationResult?.data?.solutionVector,
@@ -2544,8 +2761,7 @@ function runSimulation() {
       state.simulationResult = null;
       return {
         ok: false,
-        message:
-          "O solver nao convergiu para o circuito com diodos. Se houver fonte ideal diretamente no diodo, adicione resistencia limitadora.",
+        message: "O solver nao convergiu para o circuito nao linear. Revise saturacoes, malhas ideais e entradas flutuantes.",
       };
     }
   } else {
@@ -2628,8 +2844,22 @@ function runSimulation() {
   return { ok: true, data };
 }
 
-function buildLinearMnaSystem(activeComponents, voltageSources, rootByTerminal, getNodeIdx, nodeCount) {
-  const size = nodeCount + voltageSources.length;
+function getComponentTerminalRoots(component, rootByTerminal) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def) return [];
+
+  const roots = [];
+  for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
+    const root = rootByTerminal.get(terminalKey(component.id, terminalIndex));
+    if (root) {
+      roots.push(root);
+    }
+  }
+  return roots;
+}
+
+function buildLinearMnaSystem(activeComponents, voltageSources, opAmps, rootByTerminal, getNodeIdx, nodeCount) {
+  const size = nodeCount + voltageSources.length + opAmps.length;
   const A = Array.from({ length: size }, () => Array(size).fill(0));
   const z = Array(size).fill(0);
 
@@ -2670,6 +2900,17 @@ function buildLinearMnaSystem(activeComponents, voltageSources, rootByTerminal, 
     z[row] = component.value || 0;
   });
 
+  opAmps.forEach((component, index) => {
+    const row = nodeCount + voltageSources.length + index;
+    const outputRoot = rootByTerminal.get(terminalKey(component.id, OP_AMP_OUTPUT_TERMINAL_INDEX));
+    const outputNode = getNodeIdx(outputRoot);
+
+    if (outputNode >= 0) {
+      A[outputNode][row] += 1;
+      A[row][outputNode] += 1;
+    }
+  });
+
   return { A, z };
 }
 
@@ -2677,6 +2918,8 @@ function solveNonlinearCircuit({
   baseMatrix,
   baseVector,
   diodes,
+  opAmps,
+  opAmpRowOffset,
   rootByTerminal,
   getNodeIdx,
   previousSolution,
@@ -2690,6 +2933,8 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      opAmps,
+      opAmpRowOffset,
       rootByTerminal,
       getNodeIdx
     );
@@ -2699,24 +2944,61 @@ function solveNonlinearCircuit({
   }
 
   let vector = Array(size).fill(0);
+  let steppingFailed = false;
   for (let stepIndex = 1; stepIndex <= NEWTON_SOURCE_STEPS; stepIndex += 1) {
     const scale = stepIndex / NEWTON_SOURCE_STEPS;
     const scaledBaseVector = baseVector.map((value) => value * scale);
-    vector = runNewtonIterations(
+    const steppedVector = runNewtonIterations(
       vector,
       baseMatrix,
       scaledBaseVector,
       diodes,
+      opAmps,
+      opAmpRowOffset,
       rootByTerminal,
       getNodeIdx
     );
 
-    if (!vector) {
-      return null;
+    if (!steppedVector) {
+      steppingFailed = true;
+      break;
     }
+
+    vector = steppedVector;
   }
 
-  return vector;
+  if (!steppingFailed) {
+    return vector;
+  }
+
+  const resumed = runNewtonIterations(
+    vector,
+    baseMatrix,
+    baseVector,
+    diodes,
+    opAmps,
+    opAmpRowOffset,
+    rootByTerminal,
+    getNodeIdx
+  );
+  if (resumed) {
+    return resumed;
+  }
+
+  if (maxAbsValue(vector) > 0) {
+    return runNewtonIterations(
+      Array(size).fill(0),
+      baseMatrix,
+      baseVector,
+      diodes,
+      opAmps,
+      opAmpRowOffset,
+      rootByTerminal,
+      getNodeIdx
+    );
+  }
+
+  return null;
 }
 
 function runNewtonIterations(
@@ -2724,6 +3006,8 @@ function runNewtonIterations(
   baseMatrix,
   baseVector,
   diodes,
+  opAmps,
+  opAmpRowOffset,
   rootByTerminal,
   getNodeIdx
 ) {
@@ -2735,6 +3019,8 @@ function runNewtonIterations(
       baseMatrix,
       baseVector,
       diodes,
+      opAmps,
+      opAmpRowOffset,
       rootByTerminal,
       getNodeIdx
     );
@@ -2770,6 +3056,8 @@ function runNewtonIterations(
         baseMatrix,
         baseVector,
         diodes,
+        opAmps,
+        opAmpRowOffset,
         rootByTerminal,
         getNodeIdx
       );
@@ -2807,6 +3095,8 @@ function evaluateNonlinearSystem(
   baseMatrix,
   baseVector,
   diodes,
+  opAmps,
+  opAmpRowOffset,
   rootByTerminal,
   getNodeIdx
 ) {
@@ -2840,15 +3130,48 @@ function evaluateNonlinearSystem(
     }
   }
 
+  opAmps.forEach((component, index) => {
+    const row = opAmpRowOffset + index;
+    const { plusIndex, minusIndex } = getOpAmpInputTerminalIndices(component);
+    const rPlus = rootByTerminal.get(terminalKey(component.id, plusIndex));
+    const rMinus = rootByTerminal.get(terminalKey(component.id, minusIndex));
+    const nPlus = getNodeIdx(rPlus);
+    const nMinus = getNodeIdx(rMinus);
+    const vPlus = nPlus >= 0 ? vector[nPlus] : 0;
+    const vMinus = nMinus >= 0 ? vector[nMinus] : 0;
+    const { voltage, gain } = evaluateOpAmpModel(component, vPlus - vMinus);
+
+    residual[row] -= voltage;
+
+    if (nPlus >= 0) {
+      jacobian[row][nPlus] -= gain;
+    }
+
+    if (nMinus >= 0) {
+      jacobian[row][nMinus] += gain;
+    }
+  });
+
   return { residual, jacobian };
 }
 
-function evaluateResidualNorm(vector, baseMatrix, baseVector, diodes, rootByTerminal, getNodeIdx) {
+function evaluateResidualNorm(
+  vector,
+  baseMatrix,
+  baseVector,
+  diodes,
+  opAmps,
+  opAmpRowOffset,
+  rootByTerminal,
+  getNodeIdx
+) {
   const { residual } = evaluateNonlinearSystem(
     vector,
     baseMatrix,
     baseVector,
     diodes,
+    opAmps,
+    opAmpRowOffset,
     rootByTerminal,
     getNodeIdx
   );
@@ -3108,6 +3431,11 @@ function safeResistance(value) {
   return Math.max(1e-9, value);
 }
 
+function safeOpAmpSupply(value) {
+  if (!Number.isFinite(value)) return OP_AMP_MIN_SUPPLY;
+  return Math.max(1e-6, Math.abs(value));
+}
+
 function evaluateDiodeModel(component, voltage) {
   const def = COMPONENT_DEFS[component?.type];
   const model = def?.model || {};
@@ -3122,6 +3450,18 @@ function evaluateDiodeModel(component, voltage) {
   return {
     current: saturationCurrent * (expTerm - 1) + gmin * voltage,
     conductance: (saturationCurrent / thermalFactor) * expTerm + gmin,
+  };
+}
+
+function evaluateOpAmpModel(component, differentialVoltage) {
+  const supply = safeOpAmpSupply(component?.value);
+  const arg = clamp((OP_AMP_OPEN_LOOP_GAIN * differentialVoltage) / supply, -MAX_OP_AMP_TANH_ARG, MAX_OP_AMP_TANH_ARG);
+  const tanhValue = Math.tanh(arg);
+  const sech2 = Math.max(0, 1 - tanhValue * tanhValue);
+
+  return {
+    voltage: supply * tanhValue,
+    gain: OP_AMP_OPEN_LOOP_GAIN * sech2,
   };
 }
 
@@ -3164,6 +3504,9 @@ function formatComponentValue(component) {
   if (component.type === "current_source") {
     return formatCurrent(component.value);
   }
+  if (component.type === "op_amp") {
+    return formatSymmetricVoltage(component.value);
+  }
   return "";
 }
 
@@ -3196,6 +3539,10 @@ function formatVoltage(value) {
   return `${roundTo(value, 3)} V`;
 }
 
+function formatSymmetricVoltage(value) {
+  return `±${roundTo(Math.abs(value), 1)} V`;
+}
+
 function formatCurrent(value) {
   const abs = Math.abs(value);
   if (abs >= 1) return `${roundTo(value, 3)} A`;
@@ -3222,7 +3569,14 @@ function svgToDataUri(svg) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function buildSvgForType(type) {
+function buildOpAmpMarkerSvg(y, isPlus) {
+  const horizontal = `<line x1="44" y1="${y}" x2="56" y2="${y}"/>`;
+  if (!isPlus) return horizontal;
+  return `${horizontal}
+        <line x1="50" y1="${y - 6}" x2="50" y2="${y + 6}"/>`;
+}
+
+function buildSvgForType(type, options = {}) {
   if (type === "resistor") {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
@@ -3256,6 +3610,24 @@ function buildSvgForType(type) {
       <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
         <line x1="58" y1="40" x2="102" y2="40"/>
         <polyline points="92,30 102,40 92,50"/>
+      </g>
+    </svg>`;
+  }
+
+  if (type === "op_amp") {
+    const showMarkers = options.showOpAmpMarkers !== false;
+    const plusOnTop = options.opAmpPlusOnTop !== false;
+    const topMarker = showMarkers ? buildOpAmpMarkerSvg(40, plusOnTop) : "";
+    const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop) : "";
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160">
+      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <line x1="0" y1="40" x2="34" y2="40"/>
+        <line x1="0" y1="120" x2="34" y2="120"/>
+        <line x1="166" y1="80" x2="200" y2="80"/>
+        <polygon points="34,16 34,144 166,80" fill="#e2e8f0"/>
+        ${topMarker}
+        ${bottomMarker}
       </g>
     </svg>`;
   }

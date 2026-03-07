@@ -31,7 +31,7 @@ http://SEU_IP_LOCAL:8080/index.html
 
 ## Recursos implementados
 
-- Componentes: fonte de tensão, fonte de corrente, resistor, diodo e terra.
+- Componentes: fonte de tensão, fonte de corrente, resistor, amplificador operacional, diodo e terra.
 - Ícones dos componentes em SVG.
 - Grade por pontos no canvas.
 - Roteamento ortogonal (90°) alinhado à grade para fios.
@@ -42,6 +42,7 @@ http://SEU_IP_LOCAL:8080/index.html
 - Tentativa de evitar travessia de fios por dentro de componentes.
 - Solver DC por Análise Nodal Modificada (MNA).
 - Diodo DC com modelo não linear tipo Shockley resolvido por Newton-Raphson.
+- Amplificador operacional DC com ganho de malha aberta fixo em `200000` e alimentação simétrica ajustável.
 - Exibição de tensão de nó e corrente nos componentes durante simulação.
 - PWA básico com `manifest` + `service worker` para suporte offline após primeiro carregamento.
 
