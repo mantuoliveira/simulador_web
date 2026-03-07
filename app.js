@@ -413,7 +413,7 @@ function setupButtons() {
   });
 
   appEls.clearBtn.addEventListener("click", clearCircuit);
-  appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedOpAmpInputs);
+  appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const component = getComponentById(state.selectedComponentId);
@@ -459,13 +459,22 @@ function clearCircuit() {
   showStatus("Canvas limpo");
 }
 
-function toggleSelectedOpAmpInputs() {
+function toggleSelectedComponentTerminalOrder() {
   const component = getComponentById(state.selectedComponentId);
-  if (!component || component.type !== "op_amp") return;
+  if (!component) return;
 
-  component.inputsSwapped = !component.inputsSwapped;
+  if (component.type === "op_amp") {
+    component.inputsSwapped = !component.inputsSwapped;
+    onCircuitChanged();
+    showStatus("Entradas do amp op trocadas");
+    return;
+  }
+
+  if (component.type !== "bjt_npn") return;
+
+  component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
   onCircuitChanged();
-  showStatus("Entradas do amp op trocadas");
+  showStatus("Coletor e emissor trocados");
 }
 
 function ensureGroundForSimulation() {
@@ -1064,6 +1073,9 @@ function drawComponents() {
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(degToRad(component.rotation));
+    if (component.type === "bjt_npn" && component.collectorEmitterSwapped === true) {
+      ctx.scale(1, -1);
+    }
 
     if (sprite?.complete) {
       ctx.drawImage(sprite, -width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
@@ -1192,7 +1204,8 @@ function drawSimulationAnnotations(data) {
 
 function getCurrentArrowTerminalPair(component) {
   if (component.type === "bjt_npn") {
-    return [BJT_COLLECTOR_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX];
+    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+    return [collectorIndex, emitterIndex];
   }
 
   return [0, 1];
@@ -1291,9 +1304,11 @@ function drawCurrentArrow(component, current) {
   }
 
   if (component.type === "bjt_npn") {
-    const label = getValueLabelAnchor(component);
-    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
-    sideSign = labelProjection >= 0 ? -1 : 1;
+    const base = getTerminalPosition(component.id, BJT_BASE_TERMINAL_INDEX);
+    if (base) {
+      const baseProjection = (base.x - midX) * normalX + (base.y - midY) * normalY;
+      sideSign = baseProjection >= 0 ? -1 : 1;
+    }
     lateralOffset = 1.08;
   }
 
@@ -1542,12 +1557,15 @@ function handleTerminalTap(componentId, terminalIndex) {
   }
 
   if (first.componentId === componentId) {
-    showStatus("Conexão no mesmo componente não permitida", true);
-    state.pendingTerminal = null;
-    requestRender(true);
-    return;
+    if (isIntraComponentConnectionAllowed(componentId, first.terminalIndex, terminalIndex)) {
+      // Allow the BJT base-collector short used in current mirrors and diode-connected transistors.
+    } else {
+      showStatus("Conexão no mesmo componente não permitida", true);
+      state.pendingTerminal = null;
+      requestRender(true);
+      return;
+    }
   }
-
   if (
     hasDirectWireBetween(
       first.componentId,
@@ -1587,6 +1605,17 @@ function handleTerminalTap(componentId, terminalIndex) {
 
   state.pendingTerminal = null;
   onCircuitChanged();
+}
+
+function isIntraComponentConnectionAllowed(componentId, firstTerminalIndex, secondTerminalIndex) {
+  if (firstTerminalIndex === secondTerminalIndex) return false;
+
+  const component = getComponentById(componentId);
+  if (!component || component.type !== "bjt_npn") return false;
+
+  const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
+  const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+  return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
 }
 
 function handleWireTap(wireHit) {
@@ -1683,6 +1712,7 @@ function addComponent(type) {
     rotation: 0,
     value: def.defaultValue,
     ...(type === "op_amp" ? { inputsSwapped: false } : {}),
+    ...(type === "bjt_npn" ? { collectorEmitterSwapped: false } : {}),
   };
 
   state.components.push(component);
@@ -2570,10 +2600,11 @@ function getReachabilityTerminalPairs(component) {
   }
 
   if (component.type === "bjt_npn") {
+    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
     return [
-      [BJT_BASE_TERMINAL_INDEX, BJT_COLLECTOR_TERMINAL_INDEX],
-      [BJT_BASE_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX],
-      [BJT_COLLECTOR_TERMINAL_INDEX, BJT_EMITTER_TERMINAL_INDEX],
+      [BJT_BASE_TERMINAL_INDEX, collectorIndex],
+      [BJT_BASE_TERMINAL_INDEX, emitterIndex],
+      [collectorIndex, emitterIndex],
     ];
   }
 
@@ -2604,8 +2635,14 @@ function updateSelectionUi() {
   }
 
   appEls.rotateBtn.classList.remove("hidden");
-  if (component.type === "op_amp") {
+  if (component.type === "op_amp" || component.type === "bjt_npn") {
     appEls.swapOpAmpBtn.classList.remove("hidden");
+    appEls.swapOpAmpBtn.title =
+      component.type === "op_amp" ? "Trocar entradas do amp op" : "Trocar coletor e emissor";
+    appEls.swapOpAmpBtn.setAttribute(
+      "aria-label",
+      component.type === "op_amp" ? "Trocar entradas do amp op" : "Trocar coletor e emissor"
+    );
   } else {
     appEls.swapOpAmpBtn.classList.add("hidden");
   }
@@ -2790,6 +2827,19 @@ function getOpAmpInputTerminalIndices(component) {
     : {
         plusIndex: OP_AMP_TOP_INPUT_TERMINAL_INDEX,
         minusIndex: OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
+      };
+}
+
+function getBjtCollectorEmitterTerminalIndices(component) {
+  const collectorEmitterSwapped = component?.collectorEmitterSwapped === true;
+  return collectorEmitterSwapped
+    ? {
+        collectorIndex: BJT_EMITTER_TERMINAL_INDEX,
+        emitterIndex: BJT_COLLECTOR_TERMINAL_INDEX,
+      }
+    : {
+        collectorIndex: BJT_COLLECTOR_TERMINAL_INDEX,
+        emitterIndex: BJT_EMITTER_TERMINAL_INDEX,
       };
 }
 
@@ -3013,8 +3063,9 @@ function runSimulation() {
       componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
     } else if (component.type === "bjt_npn") {
       const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-      const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
-      const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
+      const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
       const vBase = nodeVoltageByRoot.get(rBase) ?? 0;
       const vCollector = nodeVoltageByRoot.get(rCollector) ?? 0;
       const vEmitter = nodeVoltageByRoot.get(rEmitter) ?? 0;
@@ -3583,9 +3634,10 @@ function evaluateNonlinearSystem(
   }
 
   for (const component of bjts) {
+    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
     const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-    const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
-    const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+    const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
+    const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
     const nBase = getNodeIdx(rBase);
     const nCollector = getNodeIdx(rCollector);
     const nEmitter = getNodeIdx(rEmitter);
@@ -3719,9 +3771,10 @@ function limitCandidateJunctionVoltages(candidate, previousVector, diodes, bjts,
   }
 
   for (const component of bjts) {
+    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
     const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-    const rCollector = rootByTerminal.get(terminalKey(component.id, BJT_COLLECTOR_TERMINAL_INDEX));
-    const rEmitter = rootByTerminal.get(terminalKey(component.id, BJT_EMITTER_TERMINAL_INDEX));
+    const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
+    const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
     const nBase = getNodeIdx(rBase);
     const nCollector = getNodeIdx(rCollector);
     const nEmitter = getNodeIdx(rEmitter);
