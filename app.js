@@ -248,6 +248,202 @@ const COMPONENT_DEFS = {
 
 const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "op_amp", "diode", "bjt_npn", "ground"];
 
+const DEFAULT_COMPONENT_BEHAVIOR = {
+  createState: () => ({}),
+  buildSvg: () => buildDefaultComponentSvg(),
+  formatValue: () => "",
+  valueFromNormalized: () => 0,
+  normalizedFromValue: () => 0,
+  getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
+  isSimulatedBranch: false,
+  getReachabilityTerminalPairs: () => [],
+  getCurrentArrowTerminalPair: () => [0, 1],
+  getCurrentArrowLayout: () => ({
+    sideSign: 1,
+    lateralOffset: 1.0,
+    textOffsetExtra: 0,
+  }),
+  applySpriteTransform: () => {},
+  drawSpriteOverlay: () => {},
+  swapControl: null,
+};
+
+const COMPONENT_BEHAVIORS = {
+  voltage_source: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildVoltageSourceSvg(),
+    formatValue: (component) => formatVoltage(component.value),
+    valueFromNormalized: (normalized) => roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
+    normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: (component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        getCardinalValueLabelAnchor(component, 1.62),
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.45,
+      textOffsetExtra: 0,
+    }),
+  },
+  current_source: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildCurrentSourceSvg(),
+    formatValue: (component) => formatCurrent(component.value),
+    valueFromNormalized: (normalized) => snapToStep(-0.1 + 0.2 * clamp(normalized, 0, 1), 0.001),
+    normalizedFromValue: (component) => clamp((component.value + 0.1) / 0.2, 0, 1),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.05),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: (_component, geometry) => ({
+      sideSign: 1,
+      lateralOffset: 1.45,
+      textOffsetExtra:
+        Math.abs(geometry.dirY) > Math.abs(geometry.dirX) ? Math.max(12, state.camera.zoom * 14) : 0,
+    }),
+  },
+  resistor: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildResistorSvg(),
+    formatValue: (component) => formatResistance(component.value),
+    valueFromNormalized: (normalized) => {
+      const n = clamp(normalized, 0, 1);
+      const exp = 6 * n;
+      return quantizeResistor(Math.pow(10, exp));
+    },
+    normalizedFromValue: (component) => {
+      const safe = clamp(component.value, 1, 1_000_000);
+      return clamp(Math.log10(safe) / 6, 0, 1);
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: (component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        getCardinalValueLabelAnchor(component, 1.62),
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.2,
+      textOffsetExtra:
+        Math.abs(geometry.dirY) > Math.abs(geometry.dirX) ? Math.max(10, state.camera.zoom * 12) : 0,
+    }),
+  },
+  op_amp: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({ inputsSwapped: false }),
+    buildSvg: (options = {}) => buildOpAmpSvg(options),
+    formatValue: (component) => formatSymmetricVoltage(component.value),
+    valueFromNormalized: (normalized) =>
+      snapToStep(
+        OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * clamp(normalized, 0, 1),
+        OP_AMP_SUPPLY_STEP
+      ),
+    normalizedFromValue: (component) => {
+      const safe = clamp(Math.abs(component.value), OP_AMP_MIN_SUPPLY, OP_AMP_MAX_SUPPLY);
+      return clamp((safe - OP_AMP_MIN_SUPPLY) / (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY), 0, 1);
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [],
+    drawSpriteOverlay: (component) => drawOpAmpInputMarkers(component),
+    swapControl: {
+      title: "Trocar entradas do amp op",
+      ariaLabel: "Trocar entradas do amp op",
+      toggle(component) {
+        component.inputsSwapped = !component.inputsSwapped;
+        return "Entradas do amp op trocadas";
+      },
+    },
+  },
+  diode: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildDiodeSvg(),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: () => ({
+      sideSign: 1,
+      lateralOffset: 1.2,
+      textOffsetExtra: 0,
+    }),
+  },
+  bjt_npn: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({ collectorEmitterSwapped: false }),
+    buildSvg: () => buildBjtNpnSvg(),
+    formatValue: (component) => `β=${Math.round(component.value)}`,
+    valueFromNormalized: (normalized) =>
+      snapToStep(
+        BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
+        BJT_BETA_STEP
+      ),
+    normalizedFromValue: (component) => {
+      const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
+      return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [
+        [BJT_BASE_TERMINAL_INDEX, collectorIndex],
+        [BJT_BASE_TERMINAL_INDEX, emitterIndex],
+        [collectorIndex, emitterIndex],
+      ];
+    },
+    getCurrentArrowTerminalPair: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [collectorIndex, emitterIndex];
+    },
+    getCurrentArrowLayout: (component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        getTerminalPosition(component.id, BJT_BASE_TERMINAL_INDEX),
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.collectorEmitterSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar coletor e emissor",
+      ariaLabel: "Trocar coletor e emissor",
+      toggle(component) {
+        component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
+        return "Coletor e emissor trocados";
+      },
+    },
+  },
+  ground: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildGroundSvg(),
+  },
+  junction: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: () => buildGroundSvg(),
+  },
+};
+
+for (const [type, def] of Object.entries(COMPONENT_DEFS)) {
+  def.behavior = COMPONENT_BEHAVIORS[type] || DEFAULT_COMPONENT_BEHAVIOR;
+}
+
+function getComponentBehavior(type) {
+  return COMPONENT_DEFS[type]?.behavior || DEFAULT_COMPONENT_BEHAVIOR;
+}
+
 const state = {
   components: [],
   wires: [],
@@ -465,18 +661,14 @@ function toggleSelectedComponentTerminalOrder() {
   const component = getComponentById(state.selectedComponentId);
   if (!component) return;
 
-  if (component.type === "op_amp") {
-    component.inputsSwapped = !component.inputsSwapped;
-    onCircuitChanged();
-    showStatus("Entradas do amp op trocadas");
-    return;
-  }
+  const swapControl = getComponentBehavior(component.type).swapControl;
+  if (!swapControl) return;
 
-  if (component.type !== "bjt_npn") return;
-
-  component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
+  const statusText = swapControl.toggle(component);
   onCircuitChanged();
-  showStatus("Coletor e emissor trocados");
+  if (statusText) {
+    showStatus(statusText);
+  }
 }
 
 function ensureGroundForSimulation() {
@@ -1065,6 +1257,7 @@ function drawWires() {
 function drawComponents() {
   for (const component of state.components) {
     const def = COMPONENT_DEFS[component.type];
+    const behavior = getComponentBehavior(component.type);
     const sprite = spriteMap[component.type];
     const center = worldToScreen(component.x, component.y);
     const width = worldLengthToScreen(def.renderW);
@@ -1075,9 +1268,7 @@ function drawComponents() {
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(degToRad(component.rotation));
-    if (component.type === "bjt_npn" && component.collectorEmitterSwapped === true) {
-      ctx.scale(1, -1);
-    }
+    behavior.applySpriteTransform(ctx, component);
 
     if (sprite?.complete) {
       ctx.drawImage(sprite, -width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
@@ -1086,9 +1277,7 @@ function drawComponents() {
       ctx.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
     }
 
-    if (component.type === "op_amp") {
-      drawOpAmpInputMarkers(component);
-    }
+    behavior.drawSpriteOverlay(component);
 
     if (state.selectedComponentId === component.id) {
       ctx.strokeStyle = "#0ea5a8";
@@ -1213,12 +1402,7 @@ function drawSimulationAnnotations(data) {
 }
 
 function getCurrentArrowTerminalPair(component) {
-  if (component.type === "bjt_npn") {
-    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-    return [collectorIndex, emitterIndex];
-  }
-
-  return [0, 1];
+  return getComponentBehavior(component.type).getCurrentArrowTerminalPair(component);
 }
 
 function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") {
@@ -1262,6 +1446,7 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") 
 function drawCurrentArrow(component, current) {
   const def = COMPONENT_DEFS[component.type];
   if (def.terminals.length < 2) return;
+  const behavior = getComponentBehavior(component.type);
 
   const [fromIndex, toIndex] = getCurrentArrowTerminalPair(component);
   const p0 = getTerminalPosition(component.id, fromIndex);
@@ -1286,41 +1471,16 @@ function drawCurrentArrow(component, current) {
   const normalX = -dirY;
   const normalY = dirX;
   const shaftHalf = 1.05;
-  let sideSign = 1;
-  let lateralOffset = 1.0;
-
-  if (component.type === "voltage_source" || component.type === "current_source") {
-    // Keep source current arrows farther away from circular symbols.
-    lateralOffset = 1.45;
-  }
-
-  if (component.type === "voltage_source") {
-    // Keep voltage source current arrow opposite to the source value label.
-    const label = getValueLabelAnchor(component);
-    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
-    sideSign = labelProjection >= 0 ? -1 : 1;
-  }
-
-  if (component.type === "resistor") {
-    // Keep resistor current arrow opposite to the resistor value label.
-    const label = getValueLabelAnchor(component);
-    const labelProjection = (label.x - midX) * normalX + (label.y - midY) * normalY;
-    sideSign = labelProjection >= 0 ? -1 : 1;
-    lateralOffset = 1.2;
-  }
-
-  if (component.type === "diode") {
-    lateralOffset = 1.2;
-  }
-
-  if (component.type === "bjt_npn") {
-    const base = getTerminalPosition(component.id, BJT_BASE_TERMINAL_INDEX);
-    if (base) {
-      const baseProjection = (base.x - midX) * normalX + (base.y - midY) * normalY;
-      sideSign = baseProjection >= 0 ? -1 : 1;
-    }
-    lateralOffset = 1.08;
-  }
+  const arrowLayout = behavior.getCurrentArrowLayout(component, {
+    dirX,
+    dirY,
+    midX,
+    midY,
+    normalX,
+    normalY,
+  });
+  const sideSign = arrowLayout.sideSign ?? 1;
+  const lateralOffset = arrowLayout.lateralOffset ?? 1.0;
 
   const sideNormalX = normalX * sideSign;
   const sideNormalY = normalY * sideSign;
@@ -1367,13 +1527,7 @@ function drawCurrentArrow(component, current) {
 
   const text = formatCurrent(signed);
   ctx.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
-  let textOffset = Math.max(12, state.camera.zoom * 13);
-  if (component.type === "resistor" && Math.abs(dirY) > Math.abs(dirX)) {
-    textOffset += Math.max(10, state.camera.zoom * 12);
-  }
-  if (component.type === "current_source" && Math.abs(dirY) > Math.abs(dirX)) {
-    textOffset += Math.max(12, state.camera.zoom * 14);
-  }
+  const textOffset = Math.max(12, state.camera.zoom * 13) + (arrowLayout.textOffsetExtra || 0);
 
   const arrowMidX = (s.x + e.x) * 0.5;
   const arrowMidY = (s.y + e.y) * 0.5;
@@ -1707,6 +1861,7 @@ function hasDirectWireBetween(aComponentId, aTerminalIndex, bComponentId, bTermi
 function addComponent(type) {
   const def = COMPONENT_DEFS[type];
   if (!def) return;
+  const behavior = getComponentBehavior(type);
 
   const spot = findEmptySpot(type);
   if (!spot) {
@@ -1721,8 +1876,7 @@ function addComponent(type) {
     y: spot.y,
     rotation: 0,
     value: def.defaultValue,
-    ...(type === "op_amp" ? { inputsSwapped: false } : {}),
-    ...(type === "bjt_npn" ? { collectorEmitterSwapped: false } : {}),
+    ...behavior.createState(),
   };
 
   state.components.push(component);
@@ -2594,31 +2748,14 @@ function terminalRefsEqual(a, b) {
 }
 
 function isSimulatedBranchComponent(type) {
-  return (
-    type === "voltage_source" ||
-    type === "current_source" ||
-    type === "resistor" ||
-    type === "diode" ||
-    type === "bjt_npn" ||
-    type === "op_amp"
-  );
+  return getComponentBehavior(type).isSimulatedBranch;
 }
 
 function getReachabilityTerminalPairs(component) {
-  if (!component || component.type === "op_amp" || !isSimulatedBranchComponent(component.type)) {
+  if (!component) {
     return [];
   }
-
-  if (component.type === "bjt_npn") {
-    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-    return [
-      [BJT_BASE_TERMINAL_INDEX, collectorIndex],
-      [BJT_BASE_TERMINAL_INDEX, emitterIndex],
-      [collectorIndex, emitterIndex],
-    ];
-  }
-
-  return [[0, 1]];
+  return getComponentBehavior(component.type).getReachabilityTerminalPairs(component);
 }
 
 function updateSelectionUi() {
@@ -2645,14 +2782,11 @@ function updateSelectionUi() {
   }
 
   appEls.rotateBtn.classList.remove("hidden");
-  if (component.type === "op_amp" || component.type === "bjt_npn") {
+  const swapControl = getComponentBehavior(component.type).swapControl;
+  if (swapControl) {
     appEls.swapOpAmpBtn.classList.remove("hidden");
-    appEls.swapOpAmpBtn.title =
-      component.type === "op_amp" ? "Trocar entradas do amp op" : "Trocar coletor e emissor";
-    appEls.swapOpAmpBtn.setAttribute(
-      "aria-label",
-      component.type === "op_amp" ? "Trocar entradas do amp op" : "Trocar coletor e emissor"
-    );
+    appEls.swapOpAmpBtn.title = swapControl.title;
+    appEls.swapOpAmpBtn.setAttribute("aria-label", swapControl.ariaLabel);
   } else {
     appEls.swapOpAmpBtn.classList.add("hidden");
   }
@@ -2696,63 +2830,11 @@ function updateValueFromWheelPointer(clientX, clientY) {
 }
 
 function valueFromNormalized(type, normalized) {
-  const n = clamp(normalized, 0, 1);
-
-  if (type === "resistor") {
-    const minExp = 0;
-    const maxExp = 6;
-    const exp = minExp + (maxExp - minExp) * n;
-    const raw = Math.pow(10, exp);
-    return quantizeResistor(raw);
-  }
-
-  if (type === "voltage_source") {
-    return roundTo((-24 + 48 * n), 1);
-  }
-
-  if (type === "current_source") {
-    return snapToStep((-0.1 + 0.2 * n), 0.001);
-  }
-
-  if (type === "op_amp") {
-    return snapToStep(OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * n, OP_AMP_SUPPLY_STEP);
-  }
-
-  if (type === "bjt_npn") {
-    return snapToStep(BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * n, BJT_BETA_STEP);
-  }
-
-  return 0;
+  return getComponentBehavior(type).valueFromNormalized(normalized);
 }
 
 function normalizedFromValue(component) {
-  const value = component.value;
-
-  if (component.type === "resistor") {
-    const safe = clamp(value, 1, 1_000_000);
-    const exp = Math.log10(safe);
-    return clamp(exp / 6, 0, 1);
-  }
-
-  if (component.type === "voltage_source") {
-    return clamp((value + 24) / 48, 0, 1);
-  }
-
-  if (component.type === "current_source") {
-    return clamp((value + 0.1) / 0.2, 0, 1);
-  }
-
-  if (component.type === "op_amp") {
-    const safe = clamp(Math.abs(value), OP_AMP_MIN_SUPPLY, OP_AMP_MAX_SUPPLY);
-    return clamp((safe - OP_AMP_MIN_SUPPLY) / (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY), 0, 1);
-  }
-
-  if (component.type === "bjt_npn") {
-    const safe = clamp(value, BJT_MIN_BETA, BJT_MAX_BETA);
-    return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
-  }
-
-  return 0;
+  return getComponentBehavior(component.type).normalizedFromValue(component);
 }
 
 function quantizeResistor(value) {
@@ -2883,23 +2965,16 @@ function getWireById(id) {
   return state.wires.find((wire) => wire.id === id) || null;
 }
 
-function getValueLabelAnchor(component) {
+function getCardinalValueLabelAnchor(component, offset) {
   const rotation = normalizeRotation(component.rotation);
-  let offset = 1.62;
-  if (component.type === "op_amp") {
-    offset = 2.2;
-  } else if (component.type === "bjt_npn") {
-    offset = 2.1;
-  } else if (component.type === "current_source") {
-    offset = 2.05;
-  } else if (component.type === "voltage_source") {
-    offset = 1.62;
-  }
-
   if (rotation === 0) return { x: component.x, y: component.y - offset };
   if (rotation === 90) return { x: component.x + offset, y: component.y };
   if (rotation === 180) return { x: component.x, y: component.y + offset };
   return { x: component.x - offset, y: component.y };
+}
+
+function getValueLabelAnchor(component) {
+  return getComponentBehavior(component.type).getValueLabelAnchor(component);
 }
 
 function simulateCircuit({ components, wires, previousSolution = null }) {
@@ -4248,23 +4323,14 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - cx, py - cy);
 }
 
+function getPointProjectionSideSign(point, midX, midY, normalX, normalY) {
+  if (!point) return 1;
+  const projection = (point.x - midX) * normalX + (point.y - midY) * normalY;
+  return projection >= 0 ? -1 : 1;
+}
+
 function formatComponentValue(component) {
-  if (component.type === "resistor") {
-    return formatResistance(component.value);
-  }
-  if (component.type === "voltage_source") {
-    return formatVoltage(component.value);
-  }
-  if (component.type === "current_source") {
-    return formatCurrent(component.value);
-  }
-  if (component.type === "op_amp") {
-    return formatSymmetricVoltage(component.value);
-  }
-  if (component.type === "bjt_npn") {
-    return `β=${Math.round(component.value)}`;
-  }
-  return "";
+  return getComponentBehavior(component.type).formatValue(component);
 }
 
 function multiplyMatrixVector(matrix, vector) {
@@ -4353,88 +4419,7 @@ function buildOpAmpMarkerSvg(y, isPlus) {
         <line x1="50" y1="${y - 6}" x2="50" y2="${y + 6}"/>`;
 }
 
-function buildSvgForType(type, options = {}) {
-  if (type === "resistor") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="0" y1="40" x2="34" y2="40"/>
-        <polyline points="34,40 44,18 56,62 68,18 80,62 92,18 104,62 116,18 126,40"/>
-        <line x1="126" y1="40" x2="160" y2="40"/>
-      </g>
-    </svg>`;
-  }
-
-  if (type === "voltage_source") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="0" y1="40" x2="42" y2="40"/>
-        <line x1="118" y1="40" x2="160" y2="40"/>
-        <circle cx="80" cy="40" r="37"/>
-        <line x1="58" y1="40" x2="74" y2="40"/>
-        <line x1="94" y1="32" x2="94" y2="48"/>
-        <line x1="86" y1="40" x2="102" y2="40"/>
-      </g>
-    </svg>`;
-  }
-
-  if (type === "current_source") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="0" y1="40" x2="42" y2="40"/>
-        <line x1="118" y1="40" x2="160" y2="40"/>
-        <circle cx="80" cy="40" r="37"/>
-      </g>
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="58" y1="40" x2="102" y2="40"/>
-        <polyline points="92,30 102,40 92,50"/>
-      </g>
-    </svg>`;
-  }
-
-  if (type === "op_amp") {
-    const showMarkers = options.showOpAmpMarkers !== false;
-    const plusOnTop = options.opAmpPlusOnTop !== false;
-    const topMarker = showMarkers ? buildOpAmpMarkerSvg(40, plusOnTop) : "";
-    const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop) : "";
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="0" y1="40" x2="34" y2="40"/>
-        <line x1="0" y1="120" x2="34" y2="120"/>
-        <line x1="166" y1="80" x2="200" y2="80"/>
-        <polygon points="34,16 34,144 166,80" fill="#e2e8f0"/>
-        ${topMarker}
-        ${bottomMarker}
-      </g>
-    </svg>`;
-  }
-
-  if (type === "diode") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="0" y1="40" x2="42" y2="40" fill="none"/>
-        <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
-        <polygon points="42,16 42,64 100,40" fill="#e2e8f0"/>
-        <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
-      </g>
-    </svg>`;
-  }
-
-  if (type === "bjt_npn") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
-      <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-        <line x1="0" y1="80" x2="50" y2="80"/>
-        <line x1="50" y1="48" x2="50" y2="112"/>
-        <line x1="50" y1="80" x2="80" y2="48"/>
-        <line x1="80" y1="48" x2="80" y2="0"/>
-        <line x1="50" y1="80" x2="80" y2="112"/>
-        <line x1="80" y1="112" x2="80" y2="160"/>
-        <line x1="66" y1="112" x2="80" y2="112"/>
-        <line x1="80" y1="98" x2="80" y2="112"/>
-      </g>
-    </svg>`;
-  }
-
+function buildDefaultComponentSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
     <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="40" y1="0" x2="40" y2="24"/>
@@ -4443,6 +4428,95 @@ function buildSvgForType(type, options = {}) {
       <line x1="30" y1="54" x2="50" y2="54"/>
     </g>
   </svg>`;
+}
+
+function buildResistorSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="34" y2="40"/>
+      <polyline points="34,40 44,18 56,62 68,18 80,62 92,18 104,62 116,18 126,40"/>
+      <line x1="126" y1="40" x2="160" y2="40"/>
+    </g>
+  </svg>`;
+}
+
+function buildVoltageSourceSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="42" y2="40"/>
+      <line x1="118" y1="40" x2="160" y2="40"/>
+      <circle cx="80" cy="40" r="37"/>
+      <line x1="58" y1="40" x2="74" y2="40"/>
+      <line x1="94" y1="32" x2="94" y2="48"/>
+      <line x1="86" y1="40" x2="102" y2="40"/>
+    </g>
+  </svg>`;
+}
+
+function buildCurrentSourceSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="42" y2="40"/>
+      <line x1="118" y1="40" x2="160" y2="40"/>
+      <circle cx="80" cy="40" r="37"/>
+    </g>
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="58" y1="40" x2="102" y2="40"/>
+      <polyline points="92,30 102,40 92,50"/>
+    </g>
+  </svg>`;
+}
+
+function buildOpAmpSvg(options = {}) {
+  const showMarkers = options.showOpAmpMarkers !== false;
+  const plusOnTop = options.opAmpPlusOnTop !== false;
+  const topMarker = showMarkers ? buildOpAmpMarkerSvg(40, plusOnTop) : "";
+  const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop) : "";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="34" y2="40"/>
+      <line x1="0" y1="120" x2="34" y2="120"/>
+      <line x1="166" y1="80" x2="200" y2="80"/>
+      <polygon points="34,16 34,144 166,80" fill="#e2e8f0"/>
+      ${topMarker}
+      ${bottomMarker}
+    </g>
+  </svg>`;
+}
+
+function buildDiodeSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="0" y1="40" x2="42" y2="40" fill="none"/>
+      <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
+      <polygon points="42,16 42,64 100,40" fill="#e2e8f0"/>
+      <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
+    </g>
+  </svg>`;
+}
+
+function buildBjtNpnSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="80" x2="50" y2="80"/>
+      <line x1="50" y1="48" x2="50" y2="112"/>
+      <line x1="50" y1="80" x2="80" y2="48"/>
+      <line x1="80" y1="48" x2="80" y2="0"/>
+      <line x1="50" y1="80" x2="80" y2="112"/>
+      <line x1="80" y1="112" x2="80" y2="160"/>
+      <line x1="66" y1="112" x2="80" y2="112"/>
+      <line x1="80" y1="98" x2="80" y2="112"/>
+    </g>
+  </svg>`;
+}
+
+function buildGroundSvg() {
+  return buildDefaultComponentSvg();
+}
+
+function buildSvgForType(type, options = {}) {
+  return getComponentBehavior(type).buildSvg(options);
 }
 
 class DisjointSet {
