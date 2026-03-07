@@ -33,6 +33,9 @@ const TURN_PENALTY = 3;
 const TERMINAL_DIRECTION_MISMATCH_PENALTY = 0.75;
 const MOUSE_TERMINAL_HIT_RADIUS = 0.48;
 const TOUCH_TERMINAL_HIT_RADIUS = 0.78;
+const DOUBLE_TAP_MAX_DELAY_MS = 320;
+const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
+const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -257,6 +260,7 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
   getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
   isSimulatedBranch: false,
   getReachabilityTerminalPairs: () => [],
+  allowsIntraComponentConnection: () => false,
   getCurrentArrowTerminalPair: () => [0, 1],
   getCurrentArrowLayout: () => ({
     sideSign: 1,
@@ -352,6 +356,14 @@ const COMPONENT_BEHAVIORS = {
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [],
+    allowsIntraComponentConnection: (_component, firstTerminalIndex, secondTerminalIndex) => {
+      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+      return (
+        terminalPair.has(OP_AMP_OUTPUT_TERMINAL_INDEX) &&
+        (terminalPair.has(OP_AMP_TOP_INPUT_TERMINAL_INDEX) ||
+          terminalPair.has(OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX))
+      );
+    },
     drawSpriteOverlay: (component) => drawOpAmpInputMarkers(component),
     swapControl: {
       title: "Trocar entradas do amp op",
@@ -396,6 +408,11 @@ const COMPONENT_BEHAVIORS = {
         [BJT_BASE_TERMINAL_INDEX, emitterIndex],
         [collectorIndex, emitterIndex],
       ];
+    },
+    allowsIntraComponentConnection: (component, firstTerminalIndex, secondTerminalIndex) => {
+      const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+      return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
     },
     getCurrentArrowTerminalPair: (component) => {
       const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
@@ -474,6 +491,9 @@ const state = {
     initialMidY: 0,
     worldAtMidX: 0,
     worldAtMidY: 0,
+    emptyTapCandidate: false,
+    tapStartScreenX: 0,
+    tapStartScreenY: 0,
   },
 };
 
@@ -507,6 +527,12 @@ const renderState = {
 const wheelState = {
   dragging: false,
   pointerId: null,
+};
+
+const emptyCanvasTapState = {
+  lastTimestamp: 0,
+  lastScreenX: 0,
+  lastScreenY: 0,
 };
 
 const spriteMap = loadSprites();
@@ -614,21 +640,9 @@ function setupButtons() {
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
-    const component = getComponentById(state.selectedComponentId);
-    if (!component) return;
-    const before = { x: component.x, y: component.y, rotation: component.rotation };
-    component.rotation = (component.rotation + 90) % 360;
-
-    if (!isComponentPlacementValid(component, component.id)) {
-      component.rotation = before.rotation;
-      showStatus("Rotação bloqueada por colisão", true);
-      return;
-    }
-
-    if (!rerouteConnectedWires(component.id)) {
-      component.rotation = before.rotation;
-      rerouteConnectedWires(component.id);
-      showStatus("Sem rota livre para os fios", true);
+    const result = rotateComponentInCircuit(state, state.selectedComponentId);
+    if (!result.ok) {
+      showStatus(result.message || "Falha ao rotacionar componente", true);
       return;
     }
 
@@ -658,16 +672,12 @@ function clearCircuit() {
 }
 
 function toggleSelectedComponentTerminalOrder() {
-  const component = getComponentById(state.selectedComponentId);
-  if (!component) return;
+  const result = toggleComponentTerminalOrderInCircuit(state, state.selectedComponentId);
+  if (!result.ok) return;
 
-  const swapControl = getComponentBehavior(component.type).swapControl;
-  if (!swapControl) return;
-
-  const statusText = swapControl.toggle(component);
   onCircuitChanged();
-  if (statusText) {
-    showStatus(statusText);
+  if (result.message) {
+    showStatus(result.message);
   }
 }
 
@@ -881,6 +891,7 @@ function setupCanvasGestures() {
       event.preventDefault();
 
       if (event.touches.length >= 2) {
+        clearEmptyCanvasTapHistory();
         startPinch(event.touches);
         return;
       }
@@ -940,17 +951,34 @@ function setupCanvasGestures() {
           state.pointer.mode = "none";
           state.pointer.activeTouchId = null;
           state.pointer.dragComponentId = null;
+          state.pointer.emptyTapCandidate = false;
         }
         return;
       }
 
       if (state.pointer.mode === "pan") {
-        const ended = Array.from(event.changedTouches).some(
+        const endedTouch = Array.from(event.changedTouches).find(
           (touch) => touch.identifier === state.pointer.activeTouchId
         );
-        if (ended) {
+        if (endedTouch) {
+          const wasTap = state.pointer.emptyTapCandidate === true;
+          const tapPoint = clientToCanvas(endedTouch.clientX, endedTouch.clientY);
           state.pointer.mode = "none";
           state.pointer.activeTouchId = null;
+          state.pointer.emptyTapCandidate = false;
+
+          if (wasTap) {
+            const worldPoint = screenToWorld(tapPoint.x, tapPoint.y);
+            if (isCanvasPointEmpty(worldPoint.x, worldPoint.y, TOUCH_TERMINAL_HIT_RADIUS)) {
+              registerEmptyCanvasTap(
+                tapPoint.x,
+                tapPoint.y,
+                event.timeStamp || Date.now()
+              );
+            } else {
+              clearEmptyCanvasTapHistory();
+            }
+          }
         }
       }
     },
@@ -964,6 +992,8 @@ function setupCanvasGestures() {
       state.pointer.mode = "none";
       state.pointer.activeTouchId = null;
       state.pointer.dragComponentId = null;
+      state.pointer.emptyTapCandidate = false;
+      clearEmptyCanvasTapHistory();
     },
     { passive: false }
   );
@@ -1001,6 +1031,26 @@ function setupCanvasGestures() {
     clearSelection();
     startMousePan(event);
   });
+
+  appEls.canvas.addEventListener(
+    "dblclick",
+    (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      const worldPoint = clientToWorld(event.clientX, event.clientY);
+      if (!isCanvasPointEmpty(worldPoint.x, worldPoint.y, MOUSE_TERMINAL_HIT_RADIUS)) {
+        return;
+      }
+
+      const screenPoint = clientToCanvas(event.clientX, event.clientY);
+      state.pointer.mode = "none";
+      state.pointer.dragComponentId = null;
+      resetZoomToDefaultAtPoint(screenPoint.x, screenPoint.y);
+      clearEmptyCanvasTapHistory();
+    },
+    { passive: false }
+  );
 
   window.addEventListener("mousemove", (event) => {
     if (state.pointer.mode === "mouse-drag") {
@@ -1563,6 +1613,7 @@ function startSingleTouch(touch) {
 
   const terminalHit = pickTerminal(point.x, point.y, TOUCH_TERMINAL_HIT_RADIUS);
   if (terminalHit) {
+    clearEmptyCanvasTapHistory();
     handleTerminalTap(terminalHit.componentId, terminalHit.terminalIndex);
     state.pointer.mode = "none";
     return;
@@ -1570,6 +1621,7 @@ function startSingleTouch(touch) {
 
   const componentHit = pickComponentBody(point.x, point.y);
   if (componentHit) {
+    clearEmptyCanvasTapHistory();
     selectComponent(componentHit.id);
     state.pointer.mode = "drag";
     state.pointer.activeTouchId = touch.identifier;
@@ -1581,6 +1633,7 @@ function startSingleTouch(touch) {
 
   const wireHit = pickWire(point.x, point.y);
   if (wireHit) {
+    clearEmptyCanvasTapHistory();
     if (state.pendingTerminal) {
       handleWireTap(wireHit);
       state.pointer.mode = "none";
@@ -1617,11 +1670,27 @@ function startPan(touch) {
   state.pointer.initialMidY = point.y;
   state.pointer.initialOffsetX = state.camera.offsetX;
   state.pointer.initialOffsetY = state.camera.offsetY;
+  state.pointer.emptyTapCandidate = true;
+  state.pointer.tapStartScreenX = point.x;
+  state.pointer.tapStartScreenY = point.y;
   requestRender(true);
 }
 
 function movePan(touch) {
   const point = clientToCanvas(touch.clientX, touch.clientY);
+  if (
+    state.pointer.emptyTapCandidate &&
+    distance(
+      point.x,
+      point.y,
+      state.pointer.tapStartScreenX,
+      state.pointer.tapStartScreenY
+    ) > EMPTY_TAP_MOVE_TOLERANCE_PX
+  ) {
+    state.pointer.emptyTapCandidate = false;
+    clearEmptyCanvasTapHistory();
+  }
+
   state.camera.offsetX = state.pointer.initialOffsetX + (point.x - state.pointer.initialMidX);
   state.camera.offsetY = state.pointer.initialOffsetY + (point.y - state.pointer.initialMidY);
   requestRender();
@@ -1634,6 +1703,7 @@ function startMousePan(event) {
   state.pointer.initialMidY = point.y;
   state.pointer.initialOffsetX = state.camera.offsetX;
   state.pointer.initialOffsetY = state.camera.offsetY;
+  state.pointer.emptyTapCandidate = false;
   requestRender(true);
 }
 
@@ -1694,6 +1764,49 @@ function zoomAroundPoint(screenX, screenY, targetZoom) {
   requestRender();
 }
 
+function resetZoomToDefaultAtPoint(screenX, screenY) {
+  if (Math.abs(state.camera.zoom - 1) <= 1e-9) {
+    return false;
+  }
+
+  zoomAroundPoint(screenX, screenY, 1);
+  return true;
+}
+
+function clearEmptyCanvasTapHistory() {
+  emptyCanvasTapState.lastTimestamp = 0;
+}
+
+function registerEmptyCanvasTap(screenX, screenY, timestamp = Date.now()) {
+  const isDoubleTap =
+    timestamp - emptyCanvasTapState.lastTimestamp <= DOUBLE_TAP_MAX_DELAY_MS &&
+    distance(
+      screenX,
+      screenY,
+      emptyCanvasTapState.lastScreenX,
+      emptyCanvasTapState.lastScreenY
+    ) <= DOUBLE_TAP_MAX_DISTANCE_PX;
+
+  emptyCanvasTapState.lastTimestamp = timestamp;
+  emptyCanvasTapState.lastScreenX = screenX;
+  emptyCanvasTapState.lastScreenY = screenY;
+
+  if (!isDoubleTap) {
+    return false;
+  }
+
+  clearEmptyCanvasTapHistory();
+  return resetZoomToDefaultAtPoint(screenX, screenY);
+}
+
+function isCanvasPointEmpty(worldX, worldY, terminalThreshold) {
+  return (
+    !pickTerminal(worldX, worldY, terminalThreshold) &&
+    !pickComponentBody(worldX, worldY) &&
+    !pickWire(worldX, worldY)
+  );
+}
+
 function findTouchById(touchList, id) {
   for (let i = 0; i < touchList.length; i += 1) {
     if (touchList[i].identifier === id) return touchList[i];
@@ -1722,7 +1835,7 @@ function handleTerminalTap(componentId, terminalIndex) {
 
   if (first.componentId === componentId) {
     if (isIntraComponentConnectionAllowed(componentId, first.terminalIndex, terminalIndex)) {
-      // Allow the BJT base-collector short used in current mirrors and diode-connected transistors.
+      // Allow explicit feedback/short pairs declared by the component behavior.
     } else {
       showStatus("Conexão no mesmo componente não permitida", true);
       state.pendingTerminal = null;
@@ -1775,11 +1888,13 @@ function isIntraComponentConnectionAllowed(componentId, firstTerminalIndex, seco
   if (firstTerminalIndex === secondTerminalIndex) return false;
 
   const component = getComponentById(componentId);
-  if (!component || component.type !== "bjt_npn") return false;
+  if (!component) return false;
 
-  const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
-  const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
-  return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
+  return getComponentBehavior(component.type).allowsIntraComponentConnection(
+    component,
+    firstTerminalIndex,
+    secondTerminalIndex
+  );
 }
 
 function handleWireTap(wireHit) {
@@ -1839,7 +1954,14 @@ function handleWireTap(wireHit) {
     path: branchRoute,
   };
 
-  replaceWireWithTap(wireHit.wire.id, junction, splitWires, branchWire);
+  const result = replaceWireWithTap(wireHit.wire.id, junction, splitWires, branchWire);
+  if (!result.ok) {
+    showStatus(result.message || "Nao foi possivel criar a derivacao", true);
+    state.pendingTerminal = null;
+    requestRender(true);
+    return;
+  }
+
   state.pendingTerminal = null;
   onCircuitChanged();
 }
@@ -1859,35 +1981,59 @@ function hasDirectWireBetween(aComponentId, aTerminalIndex, bComponentId, bTermi
 }
 
 function addComponent(type) {
-  const def = COMPONENT_DEFS[type];
-  if (!def) return;
-  const behavior = getComponentBehavior(type);
-
   const spot = findEmptySpot(type);
   if (!spot) {
     showStatus("Sem espaço livre no canvas", true);
     return;
   }
 
+  const result = addComponentToCircuit(state, type, spot);
+  if (!result.ok) {
+    showStatus(result.message || "Falha ao adicionar componente", true);
+    return;
+  }
+
+  selectComponent(result.component.id);
+  onCircuitChanged();
+}
+
+function addComponentToCircuit(circuit, type, position) {
+  const def = COMPONENT_DEFS[type];
+  if (!def) {
+    return { ok: false, message: "Tipo de componente invalido" };
+  }
+
+  if (!position) {
+    return { ok: false, message: "Posicao invalida" };
+  }
+
+  const behavior = getComponentBehavior(type);
   const component = {
-    id: state.nextComponentId++,
+    id: circuit.nextComponentId,
     type,
-    x: spot.x,
-    y: spot.y,
+    x: position.x,
+    y: position.y,
     rotation: 0,
     value: def.defaultValue,
     ...behavior.createState(),
   };
 
-  state.components.push(component);
-  selectComponent(component.id);
-  state.pendingTerminal = null;
-  onCircuitChanged();
+  if (!isComponentPlacementValidForComponents(circuit.components, component, null, 0)) {
+    return { ok: false, message: "Posicao ocupada" };
+  }
+
+  circuit.components.push(component);
+  circuit.nextComponentId += 1;
+  return { ok: true, component };
 }
 
 function buildJunctionComponent(point) {
+  return buildJunctionComponentForCircuit(state, point);
+}
+
+function buildJunctionComponentForCircuit(circuit, point) {
   return {
-    id: state.nextComponentId,
+    id: circuit.nextComponentId,
     type: "junction",
     x: point.x,
     y: point.y,
@@ -1897,14 +2043,18 @@ function buildJunctionComponent(point) {
 }
 
 function buildSplitWires(originalWire, junctionId, splitPaths) {
-  const splitGroupId = state.nextSplitGroupId;
+  return buildSplitWiresForCircuit(state, originalWire, junctionId, splitPaths);
+}
+
+function buildSplitWiresForCircuit(circuit, originalWire, junctionId, splitPaths) {
+  const splitGroupId = circuit.nextSplitGroupId;
   const originalPath = clonePath(originalWire.path);
   const originalFrom = cloneTerminalRef(originalWire.from);
   const originalTo = cloneTerminalRef(originalWire.to);
 
   return [
     {
-      id: state.nextWireId,
+      id: circuit.nextWireId,
       from: cloneTerminalRef(originalWire.from),
       to: { componentId: junctionId, terminalIndex: 0 },
       path: splitPaths.firstPath,
@@ -1915,7 +2065,7 @@ function buildSplitWires(originalWire, junctionId, splitPaths) {
       splitOriginalTo: originalTo,
     },
     {
-      id: state.nextWireId + 1,
+      id: circuit.nextWireId + 1,
       from: { componentId: junctionId, terminalIndex: 0 },
       to: cloneTerminalRef(originalWire.to),
       path: splitPaths.secondPath,
@@ -1929,12 +2079,22 @@ function buildSplitWires(originalWire, junctionId, splitPaths) {
 }
 
 function replaceWireWithTap(originalWireId, junction, splitWires, branchWire) {
-  state.wires = state.wires.filter((wire) => wire.id !== originalWireId);
-  state.components.push(junction);
-  state.wires.push(...splitWires, branchWire);
-  state.nextComponentId += 1;
-  state.nextWireId += 3;
-  state.nextSplitGroupId += 1;
+  return replaceWireWithTapInCircuit(state, originalWireId, junction, splitWires, branchWire);
+}
+
+function replaceWireWithTapInCircuit(circuit, originalWireId, junction, splitWires, branchWire) {
+  if (!getWireByIdFromCollection(circuit.wires, originalWireId)) {
+    return { ok: false, message: "Fio original nao encontrado" };
+  }
+
+  circuit.wires = circuit.wires.filter((wire) => wire.id !== originalWireId);
+  circuit.components.push(junction);
+  circuit.wires.push(...splitWires, branchWire);
+  circuit.nextComponentId += 1;
+  circuit.nextWireId += 3;
+  circuit.nextSplitGroupId += 1;
+  clearInvalidSelectionsInCircuit(circuit);
+  return { ok: true };
 }
 
 function splitWirePathAtPoint(path, segmentIndex, point) {
@@ -2051,50 +2211,116 @@ function findEmptySpot(type) {
   return null;
 }
 
-function tryMoveComponent(componentId, targetX, targetY) {
-  const component = getComponentById(componentId);
-  if (!component) return false;
+function snapshotWirePaths(wires) {
+  const previousPaths = new Map();
+  for (const wire of wires) {
+    previousPaths.set(wire.id, wire.path);
+  }
+  return previousPaths;
+}
 
-  const prevX = component.x;
-  const prevY = component.y;
+function restoreWirePaths(wires, previousPaths) {
+  for (const wire of wires) {
+    if (previousPaths.has(wire.id)) {
+      wire.path = previousPaths.get(wire.id);
+    }
+  }
+}
+
+function tryMoveComponent(componentId, targetX, targetY) {
+  const result = moveComponentInCircuit(state, componentId, targetX, targetY);
+  if (result.ok) {
+    onCircuitChanged();
+  }
+  return result.ok;
+}
+
+function moveComponentInCircuit(circuit, componentId, targetX, targetY) {
+  const component = getComponentByIdFromCollection(circuit.components, componentId);
+  if (!component) {
+    return { ok: false, message: "Componente nao encontrado" };
+  }
+
+  if (targetX === component.x && targetY === component.y) {
+    return { ok: true, component };
+  }
+
+  const previousPosition = { x: component.x, y: component.y };
+  const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
+  const previousPaths = snapshotWirePaths(linkedWires);
 
   component.x = targetX;
   component.y = targetY;
 
-  if (!isComponentPlacementValid(component, component.id, 0)) {
-    component.x = prevX;
-    component.y = prevY;
-    return false;
+  if (!isComponentPlacementValidForComponents(circuit.components, component, component.id, 0)) {
+    component.x = previousPosition.x;
+    component.y = previousPosition.y;
+    return { ok: false };
   }
 
-  const linkedWires = getWiresForComponent(component.id);
-  const previousPaths = new Map();
-  for (const wire of linkedWires) {
-    previousPaths.set(wire.id, wire.path);
+  if (!rerouteConnectedWiresInCircuit(circuit, componentId)) {
+    component.x = previousPosition.x;
+    component.y = previousPosition.y;
+    restoreWirePaths(linkedWires, previousPaths);
+    return { ok: false };
   }
 
-  if (!rerouteConnectedWires(component.id)) {
-    component.x = prevX;
-    component.y = prevY;
-    for (const wire of linkedWires) {
-      const old = previousPaths.get(wire.id);
-      if (old) wire.path = old;
-    }
-    return false;
-  }
-
-  onCircuitChanged();
-  return true;
+  return { ok: true, component };
 }
 
-function isComponentPlacementValid(candidate, ignoreId = null, padding = 0) {
-  for (const component of state.components) {
+function rotateComponentInCircuit(circuit, componentId, step = 90) {
+  const component = getComponentByIdFromCollection(circuit.components, componentId);
+  if (!component) {
+    return { ok: false, message: "Componente nao encontrado" };
+  }
+
+  const previousRotation = component.rotation;
+  const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
+  const previousPaths = snapshotWirePaths(linkedWires);
+
+  component.rotation = normalizeRotation(component.rotation + step);
+
+  if (!isComponentPlacementValidForComponents(circuit.components, component, component.id, 0)) {
+    component.rotation = previousRotation;
+    return { ok: false, message: "Rotacao bloqueada por colisao" };
+  }
+
+  if (!rerouteConnectedWiresInCircuit(circuit, componentId)) {
+    component.rotation = previousRotation;
+    restoreWirePaths(linkedWires, previousPaths);
+    return { ok: false, message: "Sem rota livre para os fios" };
+  }
+
+  return { ok: true, component };
+}
+
+function toggleComponentTerminalOrderInCircuit(circuit, componentId) {
+  const component = getComponentByIdFromCollection(circuit.components, componentId);
+  if (!component) {
+    return { ok: false, message: "Componente nao encontrado" };
+  }
+
+  const swapControl = getComponentBehavior(component.type).swapControl;
+  if (!swapControl) {
+    return { ok: false };
+  }
+
+  const message = swapControl.toggle(component);
+  return { ok: true, component, message };
+}
+
+function isComponentPlacementValidForComponents(components, candidate, ignoreId = null, padding = 0) {
+  for (const component of components) {
     if (ignoreId != null && component.id === ignoreId) continue;
     if (componentsOverlap(candidate, component, padding)) {
       return false;
     }
   }
   return true;
+}
+
+function isComponentPlacementValid(candidate, ignoreId = null, padding = 0) {
+  return isComponentPlacementValidForComponents(state.components, candidate, ignoreId, padding);
 }
 
 function componentsOverlap(a, b, padding = 0) {
@@ -2161,17 +2387,28 @@ function getFootprintExtents(component) {
   return extents;
 }
 
-function rerouteConnectedWires(componentId) {
-  const wires = getWiresForComponent(componentId);
+function rerouteConnectedWiresInCircuit(circuit, componentId) {
+  const wires = getWiresForComponentFromCollection(circuit.wires, componentId);
   for (const wire of wires) {
-    const start = getTerminalPosition(wire.from.componentId, wire.from.terminalIndex);
-    const end = getTerminalPosition(wire.to.componentId, wire.to.terminalIndex);
+    const start = getTerminalPositionForComponents(
+      circuit.components,
+      wire.from.componentId,
+      wire.from.terminalIndex
+    );
+    const end = getTerminalPositionForComponents(
+      circuit.components,
+      wire.to.componentId,
+      wire.to.terminalIndex
+    );
     if (!start || !end) return false;
 
-    const route = routeWire(
+    const route = routeWireInCircuit(
+      circuit,
       start,
       end,
-      buildRouteTerminalOptions(wire.from, wire.to, { ignoreWireIds: new Set([wire.id]) })
+      buildRouteTerminalOptionsForComponents(circuit.components, wire.from, wire.to, {
+        ignoreWireIds: new Set([wire.id]),
+      })
     );
     if (!route) return false;
     wire.path = route;
@@ -2179,18 +2416,26 @@ function rerouteConnectedWires(componentId) {
   return true;
 }
 
-function getWiresForComponent(componentId) {
-  return state.wires.filter(
+function rerouteConnectedWires(componentId) {
+  return rerouteConnectedWiresInCircuit(state, componentId);
+}
+
+function getWiresForComponentFromCollection(wires, componentId) {
+  return wires.filter(
     (wire) => wire.from.componentId === componentId || wire.to.componentId === componentId
   );
 }
 
-function routeWire(start, end, options = {}) {
-  const blocked = new Set();
-  const occupiedEdges = buildOccupiedWireEdgeSet(options.ignoreWireIds);
-  const nodeProximity = buildTerminalProximitySet(start, end);
+function getWiresForComponent(componentId) {
+  return getWiresForComponentFromCollection(state.wires, componentId);
+}
 
-  for (const component of state.components) {
+function routeWireInCircuit(circuit, start, end, options = {}) {
+  const blocked = new Set();
+  const occupiedEdges = buildOccupiedWireEdgeSetForWires(circuit.wires, options.ignoreWireIds);
+  const nodeProximity = buildTerminalProximitySetForComponents(circuit.components, start, end);
+
+  for (const component of circuit.components) {
     const cells = getObstacleCells(component);
     for (const cell of cells) {
       blocked.add(key(cell.x, cell.y));
@@ -2200,20 +2445,24 @@ function routeWire(start, end, options = {}) {
   blocked.delete(key(start.x, start.y));
   blocked.delete(key(end.x, end.y));
 
-  const bounds = routeBounds(start, end);
+  const bounds = routeBoundsForComponents(circuit.components, start, end);
   return findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, {
     preferredStartDirection: options.startDirection || null,
     preferredEndDirection: options.endDirection || null,
   });
 }
 
-function routeBounds(start, end) {
+function routeWire(start, end, options = {}) {
+  return routeWireInCircuit(state, start, end, options);
+}
+
+function routeBoundsForComponents(components, start, end) {
   let minX = Math.min(start.x, end.x);
   let minY = Math.min(start.y, end.y);
   let maxX = Math.max(start.x, end.x);
   let maxY = Math.max(start.y, end.y);
 
-  for (const component of state.components) {
+  for (const component of components) {
     const fp = getFootprintExtents(component);
     minX = Math.min(minX, Math.floor(component.x - fp.left - 2));
     maxX = Math.max(maxX, Math.ceil(component.x + fp.right + 2));
@@ -2228,6 +2477,10 @@ function routeBounds(start, end) {
     minY: minY - pad,
     maxY: maxY + pad,
   };
+}
+
+function routeBounds(start, end) {
+  return routeBoundsForComponents(state.components, start, end);
 }
 
 function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, preferences = {}) {
@@ -2322,10 +2575,10 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
   return null;
 }
 
-function buildOccupiedWireEdgeSet(ignoreWireIds = new Set()) {
+function buildOccupiedWireEdgeSetForWires(wires, ignoreWireIds = new Set()) {
   const occupied = new Set();
 
-  for (const wire of state.wires) {
+  for (const wire of wires) {
     if (ignoreWireIds.has(wire.id)) continue;
     if (!Array.isArray(wire.path) || wire.path.length < 2) continue;
 
@@ -2353,16 +2606,20 @@ function buildOccupiedWireEdgeSet(ignoreWireIds = new Set()) {
   return occupied;
 }
 
-function buildTerminalProximitySet(start, end) {
+function buildOccupiedWireEdgeSet(ignoreWireIds = new Set()) {
+  return buildOccupiedWireEdgeSetForWires(state.wires, ignoreWireIds);
+}
+
+function buildTerminalProximitySetForComponents(components, start, end) {
   const protectedKeys = new Set([key(start.x, start.y), key(end.x, end.y)]);
   const proximity = new Set();
 
-  for (const component of state.components) {
+  for (const component of components) {
     const def = COMPONENT_DEFS[component.type];
     if (!def) continue;
 
     for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
-      const terminal = getTerminalPosition(component.id, terminalIndex);
+      const terminal = getTerminalPositionForComponents(components, component.id, terminalIndex);
       if (!terminal) continue;
 
       const terminalKeyValue = key(terminal.x, terminal.y);
@@ -2385,6 +2642,10 @@ function buildTerminalProximitySet(start, end) {
   }
 
   return proximity;
+}
+
+function buildTerminalProximitySet(start, end) {
+  return buildTerminalProximitySetForComponents(state.components, start, end);
 }
 
 function rebuildPath(cameFrom, currentKey) {
@@ -2576,63 +2837,36 @@ function clearSelection() {
 }
 
 function removeComponent(componentId) {
-  const index = state.components.findIndex((component) => component.id === componentId);
-  if (index < 0) return;
+  const result = removeComponentFromCircuit(state, componentId);
+  if (!result.ok) return;
 
-  const removedWires = state.wires.filter(
-    (wire) => wire.from.componentId === componentId || wire.to.componentId === componentId
-  );
-  const cleanupTargets = collectWireCleanupTargets(removedWires);
-
-  state.components.splice(index, 1);
-  state.wires = state.wires.filter(
-    (wire) => wire.from.componentId !== componentId && wire.to.componentId !== componentId
-  );
-
-  if (state.pendingTerminal?.componentId === componentId) {
-    state.pendingTerminal = null;
-  }
-
-  if (state.selectedComponentId === componentId) {
-    state.selectedComponentId = null;
-  }
-
-  if (state.selectedWireId != null && !getWireById(state.selectedWireId)) {
-    state.selectedWireId = null;
-  }
-
-  cleanupAutoJunctions(cleanupTargets);
   updateSelectionUi();
   onCircuitChanged();
   showStatus("Componente removido");
 }
 
 function removeWire(wireId) {
-  const wire = getWireById(wireId);
-  if (!wire) return;
+  const result = removeWireFromCircuit(state, wireId);
+  if (!result.ok) return;
 
-  const cleanupTargets = collectWireCleanupTargets([wire]);
-  state.wires = state.wires.filter((candidate) => candidate.id !== wireId);
-
-  if (state.selectedWireId === wireId) {
-    state.selectedWireId = null;
-  }
-
-  cleanupAutoJunctions(cleanupTargets);
   updateSelectionUi();
   onCircuitChanged();
   showStatus("Conector removido");
 }
 
 function collectWireCleanupTargets(wires) {
+  return collectWireCleanupTargetsForCircuit(state, wires);
+}
+
+function collectWireCleanupTargetsForCircuit(circuit, wires) {
   const targets = new Set();
 
   for (const wire of wires) {
-    if (getComponentById(wire.from.componentId)?.type === "junction") {
+    if (getComponentByIdFromCollection(circuit.components, wire.from.componentId)?.type === "junction") {
       targets.add(wire.from.componentId);
     }
 
-    if (getComponentById(wire.to.componentId)?.type === "junction") {
+    if (getComponentByIdFromCollection(circuit.components, wire.to.componentId)?.type === "junction") {
       targets.add(wire.to.componentId);
     }
   }
@@ -2641,6 +2875,10 @@ function collectWireCleanupTargets(wires) {
 }
 
 function cleanupAutoJunctions(junctionIds) {
+  return cleanupAutoJunctionsInCircuit(state, junctionIds);
+}
+
+function cleanupAutoJunctionsInCircuit(circuit, junctionIds) {
   const queue = [...junctionIds];
   const seen = new Set();
 
@@ -2649,50 +2887,70 @@ function cleanupAutoJunctions(junctionIds) {
     if (seen.has(junctionId)) continue;
     seen.add(junctionId);
 
-    const junction = getComponentById(junctionId);
+    const junction = getComponentByIdFromCollection(circuit.components, junctionId);
     if (!junction || junction.type !== "junction") continue;
 
-    const connectedWires = getWiresForComponent(junctionId);
+    const connectedWires = getWiresForComponentFromCollection(circuit.wires, junctionId);
     if (connectedWires.length === 0) {
-      removeJunctionComponent(junctionId);
+      removeJunctionComponentFromCircuit(circuit, junctionId);
       continue;
     }
 
     if (connectedWires.length !== 2) continue;
 
-    const merged = tryMergeSplitJunction(junctionId, connectedWires);
+    const merged = tryMergeSplitJunctionInCircuit(circuit, junctionId, connectedWires);
     if (merged) {
-      if (getComponentById(merged.from.componentId)?.type === "junction") {
+      if (getComponentByIdFromCollection(circuit.components, merged.from.componentId)?.type === "junction") {
         queue.push(merged.from.componentId);
       }
-      if (getComponentById(merged.to.componentId)?.type === "junction") {
+      if (getComponentByIdFromCollection(circuit.components, merged.to.componentId)?.type === "junction") {
         queue.push(merged.to.componentId);
       }
     }
   }
+
+  clearInvalidSelectionsInCircuit(circuit);
 }
 
 function removeJunctionComponent(junctionId) {
-  state.components = state.components.filter((component) => component.id !== junctionId);
+  return removeJunctionComponentFromCircuit(state, junctionId);
+}
 
-  if (state.pendingTerminal?.componentId === junctionId) {
-    state.pendingTerminal = null;
+function removeJunctionComponentFromCircuit(circuit, junctionId) {
+  circuit.components = circuit.components.filter((component) => component.id !== junctionId);
+
+  if (circuit.pendingTerminal?.componentId === junctionId) {
+    circuit.pendingTerminal = null;
   }
 
-  if (state.selectedComponentId === junctionId) {
-    state.selectedComponentId = null;
+  if (circuit.selectedComponentId === junctionId) {
+    circuit.selectedComponentId = null;
   }
+
+  clearInvalidSelectionsInCircuit(circuit);
 }
 
 function tryMergeSplitJunction(junctionId, connectedWires) {
+  return tryMergeSplitJunctionInCircuit(state, junctionId, connectedWires);
+}
+
+function tryMergeSplitJunctionInCircuit(circuit, junctionId, connectedWires) {
   const [first, second] = connectedWires;
   if (!areMergeableSplitPair(first, second)) {
     return null;
   }
 
   const meta = first;
-  const start = getTerminalPosition(meta.splitOriginalFrom.componentId, meta.splitOriginalFrom.terminalIndex);
-  const end = getTerminalPosition(meta.splitOriginalTo.componentId, meta.splitOriginalTo.terminalIndex);
+  const start = getTerminalPositionForComponents(
+    circuit.components,
+    meta.splitOriginalFrom.componentId,
+    meta.splitOriginalFrom.terminalIndex
+  );
+  const end = getTerminalPositionForComponents(
+    circuit.components,
+    meta.splitOriginalTo.componentId,
+    meta.splitOriginalTo.terminalIndex
+  );
   if (!start || !end) return null;
 
   let path = null;
@@ -2704,25 +2962,110 @@ function tryMergeSplitJunction(junctionId, connectedWires) {
   ) {
     path = clonePath(meta.splitOriginalPath);
   } else {
-    path = routeWire(start, end, buildRouteTerminalOptions(meta.splitOriginalFrom, meta.splitOriginalTo));
+    path = routeWireInCircuit(
+      circuit,
+      start,
+      end,
+      buildRouteTerminalOptionsForComponents(
+        circuit.components,
+        meta.splitOriginalFrom,
+        meta.splitOriginalTo
+      )
+    );
   }
 
   if (!path) return null;
 
-  state.wires = state.wires.filter(
+  circuit.wires = circuit.wires.filter(
     (wire) => wire.id !== first.id && wire.id !== second.id
   );
-  state.wires.push({
-    id: state.nextWireId++,
+  circuit.wires.push({
+    id: circuit.nextWireId++,
     from: cloneTerminalRef(meta.splitOriginalFrom),
     to: cloneTerminalRef(meta.splitOriginalTo),
     path,
   });
-  removeJunctionComponent(junctionId);
+  removeJunctionComponentFromCircuit(circuit, junctionId);
   return {
     from: cloneTerminalRef(meta.splitOriginalFrom),
     to: cloneTerminalRef(meta.splitOriginalTo),
   };
+}
+
+function removeComponentFromCircuit(circuit, componentId) {
+  const index = circuit.components.findIndex((component) => component.id === componentId);
+  if (index < 0) {
+    return { ok: false, message: "Componente nao encontrado" };
+  }
+
+  const removedWires = circuit.wires.filter(
+    (wire) => wire.from.componentId === componentId || wire.to.componentId === componentId
+  );
+  const cleanupTargets = collectWireCleanupTargetsForCircuit(circuit, removedWires);
+
+  circuit.components.splice(index, 1);
+  circuit.wires = circuit.wires.filter(
+    (wire) => wire.from.componentId !== componentId && wire.to.componentId !== componentId
+  );
+
+  if (circuit.pendingTerminal?.componentId === componentId) {
+    circuit.pendingTerminal = null;
+  }
+
+  if (circuit.selectedComponentId === componentId) {
+    circuit.selectedComponentId = null;
+  }
+
+  cleanupAutoJunctionsInCircuit(circuit, cleanupTargets);
+  clearInvalidSelectionsInCircuit(circuit);
+  return { ok: true, removedWires };
+}
+
+function removeWireFromCircuit(circuit, wireId) {
+  const wire = getWireByIdFromCollection(circuit.wires, wireId);
+  if (!wire) {
+    return { ok: false, message: "Conector nao encontrado" };
+  }
+
+  const cleanupTargets = collectWireCleanupTargetsForCircuit(circuit, [wire]);
+  circuit.wires = circuit.wires.filter((candidate) => candidate.id !== wireId);
+
+  if (circuit.selectedWireId === wireId) {
+    circuit.selectedWireId = null;
+  }
+
+  cleanupAutoJunctionsInCircuit(circuit, cleanupTargets);
+  clearInvalidSelectionsInCircuit(circuit);
+  return { ok: true, wire };
+}
+
+function clearInvalidSelectionsInCircuit(circuit) {
+  if (
+    circuit.selectedComponentId != null &&
+    !getComponentByIdFromCollection(circuit.components, circuit.selectedComponentId)
+  ) {
+    circuit.selectedComponentId = null;
+  }
+
+  if (
+    circuit.selectedWireId != null &&
+    !getWireByIdFromCollection(circuit.wires, circuit.selectedWireId)
+  ) {
+    circuit.selectedWireId = null;
+  }
+
+  if (!circuit.pendingTerminal) {
+    return;
+  }
+
+  const pendingComponent = getComponentByIdFromCollection(
+    circuit.components,
+    circuit.pendingTerminal.componentId
+  );
+  const def = pendingComponent ? COMPONENT_DEFS[pendingComponent.type] : null;
+  if (!pendingComponent || !def || !def.terminals[circuit.pendingTerminal.terminalIndex]) {
+    circuit.pendingTerminal = null;
+  }
 }
 
 function areMergeableSplitPair(first, second) {
@@ -2861,6 +3204,11 @@ function getComponentByIdFromCollection(components, id) {
   return components.find((component) => component.id === id) || null;
 }
 
+function getWireByIdFromCollection(wires, id) {
+  if (id == null) return null;
+  return wires.find((wire) => wire.id === id) || null;
+}
+
 function getTerminalPositionForComponents(components, componentId, terminalIndex) {
   const component = getComponentByIdFromCollection(components, componentId);
   if (!component) return null;
@@ -2901,18 +3249,26 @@ function getTerminalLabelDirection(componentId, terminalIndex) {
   return getTerminalLabelDirectionForComponents(state.components, componentId, terminalIndex);
 }
 
-function buildRouteTerminalOptions(fromRef, toRef = null, extraOptions = {}) {
+function buildRouteTerminalOptionsForComponents(components, fromRef, toRef = null, extraOptions = {}) {
   const options = { ...extraOptions };
 
   if (fromRef) {
-    const startDirection = getTerminalLabelDirection(fromRef.componentId, fromRef.terminalIndex);
+    const startDirection = getTerminalLabelDirectionForComponents(
+      components,
+      fromRef.componentId,
+      fromRef.terminalIndex
+    );
     if (startDirection) {
       options.startDirection = startDirection;
     }
   }
 
   if (toRef) {
-    const outwardDirection = getTerminalLabelDirection(toRef.componentId, toRef.terminalIndex);
+    const outwardDirection = getTerminalLabelDirectionForComponents(
+      components,
+      toRef.componentId,
+      toRef.terminalIndex
+    );
     const endDirection = oppositeDirection(outwardDirection);
     if (endDirection) {
       options.endDirection = endDirection;
@@ -2920,6 +3276,10 @@ function buildRouteTerminalOptions(fromRef, toRef = null, extraOptions = {}) {
   }
 
   return options;
+}
+
+function buildRouteTerminalOptions(fromRef, toRef = null, extraOptions = {}) {
+  return buildRouteTerminalOptionsForComponents(state.components, fromRef, toRef, extraOptions);
 }
 
 function getOpAmpInputTerminalIndices(component) {
@@ -2961,8 +3321,7 @@ function getComponentById(id) {
 }
 
 function getWireById(id) {
-  if (id == null) return null;
-  return state.wires.find((wire) => wire.id === id) || null;
+  return getWireByIdFromCollection(state.wires, id);
 }
 
 function getCardinalValueLabelAnchor(component, offset) {
