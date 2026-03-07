@@ -499,6 +499,7 @@ const state = {
 
 const appEls = {
   strip: document.getElementById("component-strip"),
+  canvasWrap: document.getElementById("canvas-wrap"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
   clearBtn: document.getElementById("clear-btn"),
@@ -517,6 +518,7 @@ let dpr = Math.max(1, window.devicePixelRatio || 1);
 let lastCanvasW = 0;
 let lastCanvasH = 0;
 let statusTimer = null;
+let pendingCanvasResizeFrame = null;
 
 const renderState = {
   rafId: null,
@@ -582,8 +584,30 @@ function buildComponentStrip() {
 }
 
 function setupCanvas() {
-  resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
+  queueCanvasResize();
+  window.addEventListener("resize", queueCanvasResize);
+  window.addEventListener("orientationchange", queueCanvasResize);
+  window.addEventListener("pageshow", queueCanvasResize);
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", queueCanvasResize);
+  }
+
+  if (window.ResizeObserver && appEls.canvasWrap) {
+    const observer = new ResizeObserver(() => {
+      queueCanvasResize();
+    });
+    observer.observe(appEls.canvasWrap);
+  }
+}
+
+function queueCanvasResize() {
+  if (pendingCanvasResizeFrame != null) return;
+
+  pendingCanvasResizeFrame = requestAnimationFrame(() => {
+    pendingCanvasResizeFrame = null;
+    resizeCanvas();
+  });
 }
 
 function resizeCanvas() {
@@ -591,9 +615,21 @@ function resizeCanvas() {
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
   dpr = Math.max(1, window.devicePixelRatio || 1);
+  const pixelWidth = Math.max(1, Math.floor(width * dpr));
+  const pixelHeight = Math.max(1, Math.floor(height * dpr));
 
-  appEls.canvas.width = Math.floor(width * dpr);
-  appEls.canvas.height = Math.floor(height * dpr);
+  if (
+    width === lastCanvasW &&
+    height === lastCanvasH &&
+    appEls.canvas.width === pixelWidth &&
+    appEls.canvas.height === pixelHeight
+  ) {
+    requestRender(true);
+    return;
+  }
+
+  appEls.canvas.width = pixelWidth;
+  appEls.canvas.height = pixelHeight;
 
   if (lastCanvasW === 0 && lastCanvasH === 0) {
     state.camera.offsetX = width * 0.5;
