@@ -1,4 +1,4 @@
-const CACHE_NAME = "simulador-dc-v33";
+const CACHE_NAME = "simulador-dc-v37";
 const ASSETS = [
   "./",
   "./index.html",

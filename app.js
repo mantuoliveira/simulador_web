@@ -126,30 +126,32 @@ const COMPONENT_DEFS = {
   op_amp: {
     label: "Amp Op",
     terminals: [
-      [-2, -1],
-      [-2, 1],
+      [-3, -1],
+      [-3, 1],
       [3, 0],
     ],
-    bodyHalfW: 2.2,
+    bodyHalfW: 2.7,
     bodyHalfH: 1.55,
-    renderW: 5,
+    renderW: 6,
     renderH: 4,
-    renderOffsetX: 0.5,
     defaultValue: 15,
     editable: true,
     showValueLabel: false,
     unit: "V",
     obstacleCells: [
+      [-2, -1],
       [-1, -1],
       [0, -1],
+      [-2, 0],
       [-1, 0],
       [0, 0],
       [1, 0],
       [2, 0],
+      [-2, 1],
       [-1, 1],
       [0, 1],
     ],
-    footprintExtents: { left: 2.5, right: 3, up: 2.5, down: 2.5 },
+    footprintExtents: { left: 3, right: 3, up: 2.5, down: 2.5 },
     footprintHalf: { x: 3, y: 2.5 },
   },
   diode: {
@@ -737,6 +739,9 @@ function setupButtons() {
     }
 
     onCircuitChanged();
+    if (result.selectionChanged) {
+      updateSelectionUi();
+    }
   });
 
   setupDeleteButtonGestures();
@@ -1433,7 +1438,7 @@ function drawWires(renderTarget, showSelection = true) {
   context.lineJoin = "round";
 
   for (const wire of state.wires) {
-    if (!wire.path || wire.path.length < 2) continue;
+    if (!isWireVisible(wire)) continue;
 
     context.beginPath();
     wire.path.forEach((point, index) => {
@@ -1549,7 +1554,7 @@ function drawOpAmpInputMarkers(renderTarget, component) {
   const minusBase = def.terminals[minusIndex];
   if (!plusBase || !minusBase) return;
 
-  const markerOffsetX = 1.25;
+  const markerOffsetX = 1.8;
   const halfSpan = Math.max(4.8, worldLengthToScreen(0.18));
   context.strokeStyle = "#0f172a";
   context.lineWidth = Math.max(2.2, state.camera.zoom * 2.2);
@@ -2406,19 +2411,23 @@ function findEmptySpot(type) {
   return null;
 }
 
-function snapshotWirePaths(wires) {
+function snapshotWireStates(wires) {
   const previousPaths = new Map();
   for (const wire of wires) {
-    previousPaths.set(wire.id, wire.path);
+    previousPaths.set(wire.id, {
+      path: wire.path,
+      implicitContact: wire.implicitContact === true,
+    });
   }
   return previousPaths;
 }
 
-function restoreWirePaths(wires, previousPaths) {
+function restoreWireStates(wires, previousPaths) {
   for (const wire of wires) {
-    if (previousPaths.has(wire.id)) {
-      wire.path = previousPaths.get(wire.id);
-    }
+    const previousState = previousPaths.get(wire.id);
+    if (!previousState) continue;
+    wire.path = previousState.path;
+    wire.implicitContact = previousState.implicitContact;
   }
 }
 
@@ -2426,6 +2435,9 @@ function tryMoveComponent(componentId, targetX, targetY) {
   const result = moveComponentInCircuit(state, componentId, targetX, targetY);
   if (result.ok) {
     onCircuitChanged();
+    if (result.selectionChanged) {
+      updateSelectionUi();
+    }
   }
   return result.ok;
 }
@@ -2442,25 +2454,40 @@ function moveComponentInCircuit(circuit, componentId, targetX, targetY) {
 
   const previousPosition = { x: component.x, y: component.y };
   const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
-  const previousPaths = snapshotWirePaths(linkedWires);
+  const previousWireStates = snapshotWireStates(linkedWires);
+  const previousNextWireId = circuit.nextWireId;
 
   component.x = targetX;
   component.y = targetY;
 
-  if (!isComponentPlacementValidForComponents(circuit.components, component, component.id, 0)) {
+  const autoContactCandidate = findAutoContactCandidateInCircuit(circuit, componentId);
+  if (
+    !isComponentPlacementValidForComponents(circuit.components, component, component.id, 0) &&
+    !autoContactCandidate
+  ) {
     component.x = previousPosition.x;
     component.y = previousPosition.y;
     return { ok: false };
   }
 
-  if (!rerouteConnectedWiresInCircuit(circuit, componentId)) {
+  const contactSyncResult = syncImplicitContactWiresInCircuit(
+    circuit,
+    componentId,
+    autoContactCandidate
+  );
+  if (!contactSyncResult.ok || !rerouteConnectedWiresInCircuit(circuit, componentId)) {
     component.x = previousPosition.x;
     component.y = previousPosition.y;
-    restoreWirePaths(linkedWires, previousPaths);
+    circuit.nextWireId = previousNextWireId;
+    if (contactSyncResult.createdWireId != null) {
+      circuit.wires = circuit.wires.filter((wire) => wire.id !== contactSyncResult.createdWireId);
+    }
+    restoreWireStates(linkedWires, previousWireStates);
     return { ok: false };
   }
 
-  return { ok: true, component };
+  const selectionChanged = clearInvalidSelectionsInCircuit(circuit);
+  return { ok: true, component, selectionChanged };
 }
 
 function rotateComponentInCircuit(circuit, componentId, step = 90) {
@@ -2471,7 +2498,7 @@ function rotateComponentInCircuit(circuit, componentId, step = 90) {
 
   const previousRotation = component.rotation;
   const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
-  const previousPaths = snapshotWirePaths(linkedWires);
+  const previousWireStates = snapshotWireStates(linkedWires);
 
   component.rotation = normalizeRotation(component.rotation + step);
 
@@ -2480,13 +2507,18 @@ function rotateComponentInCircuit(circuit, componentId, step = 90) {
     return { ok: false, message: "Rotacao bloqueada por colisao" };
   }
 
-  if (!rerouteConnectedWiresInCircuit(circuit, componentId)) {
+  const contactSyncResult = syncImplicitContactWiresInCircuit(circuit, componentId);
+  if (!contactSyncResult.ok || !rerouteConnectedWiresInCircuit(circuit, componentId)) {
     component.rotation = previousRotation;
-    restoreWirePaths(linkedWires, previousPaths);
+    restoreWireStates(linkedWires, previousWireStates);
     return { ok: false, message: "Sem rota livre para os fios" };
   }
 
-  return { ok: true, component };
+  return {
+    ok: true,
+    component,
+    selectionChanged: clearInvalidSelectionsInCircuit(circuit),
+  };
 }
 
 function toggleComponentTerminalOrderInCircuit(circuit, componentId) {
@@ -2540,6 +2572,158 @@ function componentsOverlap(a, b, padding = 0) {
   );
 }
 
+function findAutoContactCandidateInCircuit(circuit, movingComponentId) {
+  const movingComponent = getComponentByIdFromCollection(circuit.components, movingComponentId);
+  if (!movingComponent) return null;
+
+  const overlappingComponents = circuit.components.filter(
+    (component) =>
+      component.id !== movingComponentId && componentsOverlap(movingComponent, component, 0)
+  );
+  if (overlappingComponents.length !== 1) {
+    return null;
+  }
+
+  const targetComponent = overlappingComponents[0];
+  const movingDef = COMPONENT_DEFS[movingComponent.type];
+  const targetDef = COMPONENT_DEFS[targetComponent.type];
+  let match = null;
+
+  for (let movingTerminalIndex = 0; movingTerminalIndex < movingDef.terminals.length; movingTerminalIndex += 1) {
+    const movingTerminal = getTerminalPositionForComponents(
+      circuit.components,
+      movingComponentId,
+      movingTerminalIndex
+    );
+    if (!movingTerminal) continue;
+
+    for (let targetTerminalIndex = 0; targetTerminalIndex < targetDef.terminals.length; targetTerminalIndex += 1) {
+      const targetTerminal = getTerminalPositionForComponents(
+        circuit.components,
+        targetComponent.id,
+        targetTerminalIndex
+      );
+      if (!targetTerminal || !sameGridPoint(movingTerminal, targetTerminal)) {
+        continue;
+      }
+
+      const fromRef = { componentId: movingComponentId, terminalIndex: movingTerminalIndex };
+      const toRef = { componentId: targetComponent.id, terminalIndex: targetTerminalIndex };
+      const existingWire = findDirectWireBetweenInCircuit(circuit, fromRef, toRef);
+
+      if (match) {
+        return null;
+      }
+
+      match = {
+        fromRef,
+        toRef,
+        existingWire,
+      };
+    }
+  }
+
+  return match;
+}
+
+function findDirectWireBetweenInCircuit(circuit, firstRef, secondRef) {
+  return (
+    circuit.wires.find((wire) => wireConnectsTerminalRefs(wire, firstRef, secondRef)) || null
+  );
+}
+
+function wireConnectsTerminalRefs(wire, firstRef, secondRef) {
+  return (
+    (terminalRefsEqual(wire.from, firstRef) && terminalRefsEqual(wire.to, secondRef)) ||
+    (terminalRefsEqual(wire.from, secondRef) && terminalRefsEqual(wire.to, firstRef))
+  );
+}
+
+function syncImplicitContactWiresInCircuit(circuit, componentId, autoContactCandidate = null) {
+  let activeWire = autoContactCandidate?.existingWire || null;
+  let createdWireId = null;
+
+  if (!activeWire && autoContactCandidate) {
+    activeWire = buildImplicitContactWireInCircuit(
+      circuit,
+      autoContactCandidate.fromRef,
+      autoContactCandidate.toRef
+    );
+    if (!activeWire) {
+      return { ok: false };
+    }
+    circuit.wires.push(activeWire);
+    createdWireId = activeWire.id;
+  }
+
+  const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
+  for (const wire of linkedWires) {
+    const isActiveWire = activeWire?.id === wire.id;
+    if (!wire.implicitContact && !isActiveWire) continue;
+
+    const terminalPositions = getWireTerminalPositionsForComponents(circuit.components, wire);
+    if (!terminalPositions) {
+      return { ok: false, createdWireId };
+    }
+
+    const coincident = sameGridPoint(terminalPositions.start, terminalPositions.end);
+    if (coincident && (wire.implicitContact || isActiveWire)) {
+      wire.implicitContact = true;
+      wire.path = [
+        clonePoint(terminalPositions.start),
+        clonePoint(terminalPositions.end),
+      ];
+      continue;
+    }
+
+    if (wire.implicitContact) {
+      wire.implicitContact = false;
+    }
+  }
+
+  return { ok: true, createdWireId };
+}
+
+function buildImplicitContactWireInCircuit(circuit, fromRef, toRef) {
+  const terminalPositions = getWireTerminalPositionsForComponents(circuit.components, {
+    from: fromRef,
+    to: toRef,
+  });
+  if (!terminalPositions) {
+    return null;
+  }
+
+  return {
+    id: circuit.nextWireId++,
+    from: cloneTerminalRef(fromRef),
+    to: cloneTerminalRef(toRef),
+    path: [
+      clonePoint(terminalPositions.start),
+      clonePoint(terminalPositions.end),
+    ],
+    implicitContact: true,
+  };
+}
+
+function getWireTerminalPositionsForComponents(components, wire) {
+  const start = getTerminalPositionForComponents(
+    components,
+    wire.from.componentId,
+    wire.from.terminalIndex
+  );
+  const end = getTerminalPositionForComponents(
+    components,
+    wire.to.componentId,
+    wire.to.terminalIndex
+  );
+
+  if (!start || !end) {
+    return null;
+  }
+
+  return { start, end };
+}
+
 function getFootprintExtents(component) {
   const def = COMPONENT_DEFS[component.type];
   if (!def) return { left: 1, right: 1, up: 1, down: 1 };
@@ -2585,22 +2769,15 @@ function getFootprintExtents(component) {
 function rerouteConnectedWiresInCircuit(circuit, componentId) {
   const wires = getWiresForComponentFromCollection(circuit.wires, componentId);
   for (const wire of wires) {
-    const start = getTerminalPositionForComponents(
-      circuit.components,
-      wire.from.componentId,
-      wire.from.terminalIndex
-    );
-    const end = getTerminalPositionForComponents(
-      circuit.components,
-      wire.to.componentId,
-      wire.to.terminalIndex
-    );
-    if (!start || !end) return false;
+    if (wire.implicitContact) continue;
+
+    const terminalPositions = getWireTerminalPositionsForComponents(circuit.components, wire);
+    if (!terminalPositions) return false;
 
     const route = routeWireInCircuit(
       circuit,
-      start,
-      end,
+      terminalPositions.start,
+      terminalPositions.end,
       buildRouteTerminalOptionsForComponents(circuit.components, wire.from, wire.to, {
         ignoreWireIds: new Set([wire.id]),
       })
@@ -2613,6 +2790,15 @@ function rerouteConnectedWiresInCircuit(circuit, componentId) {
 
 function rerouteConnectedWires(componentId) {
   return rerouteConnectedWiresInCircuit(state, componentId);
+}
+
+function isWireVisible(wire) {
+  return (
+    !!wire &&
+    wire.implicitContact !== true &&
+    Array.isArray(wire.path) &&
+    wire.path.length >= 2
+  );
 }
 
 function getWiresForComponentFromCollection(wires, componentId) {
@@ -2658,8 +2844,8 @@ function pickWire(worldX, worldY) {
 
   for (let i = state.wires.length - 1; i >= 0; i -= 1) {
     const wire = state.wires[i];
+    if (!isWireVisible(wire)) continue;
     const path = wire.path;
-    if (!path || path.length < 2) continue;
 
     for (let j = 0; j < path.length - 1; j += 1) {
       const a = path[j];
@@ -2958,22 +3144,27 @@ function removeWireFromCircuit(circuit, wireId) {
 }
 
 function clearInvalidSelectionsInCircuit(circuit) {
+  let changed = false;
+
   if (
     circuit.selectedComponentId != null &&
     !getComponentByIdFromCollection(circuit.components, circuit.selectedComponentId)
   ) {
     circuit.selectedComponentId = null;
+    changed = true;
   }
 
-  if (
-    circuit.selectedWireId != null &&
-    !getWireByIdFromCollection(circuit.wires, circuit.selectedWireId)
-  ) {
+  const selectedWire =
+    circuit.selectedWireId != null
+      ? getWireByIdFromCollection(circuit.wires, circuit.selectedWireId)
+      : null;
+  if (circuit.selectedWireId != null && (!selectedWire || !isWireVisible(selectedWire))) {
     circuit.selectedWireId = null;
+    changed = true;
   }
 
   if (!circuit.pendingTerminal) {
-    return;
+    return changed;
   }
 
   const pendingComponent = getComponentByIdFromCollection(
@@ -2983,7 +3174,10 @@ function clearInvalidSelectionsInCircuit(circuit) {
   const def = pendingComponent ? COMPONENT_DEFS[pendingComponent.type] : null;
   if (!pendingComponent || !def || !def.terminals[circuit.pendingTerminal.terminalIndex]) {
     circuit.pendingTerminal = null;
+    changed = true;
   }
+
+  return changed;
 }
 
 function areMergeableSplitPair(first, second) {
@@ -3673,11 +3867,11 @@ function svgToDataUri(svg) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function buildOpAmpMarkerSvg(y, isPlus) {
-  const horizontal = `<line x1="44" y1="${y}" x2="56" y2="${y}"/>`;
+function buildOpAmpMarkerSvg(y, isPlus, centerX = 50, halfSpan = 6) {
+  const horizontal = `<line x1="${centerX - halfSpan}" y1="${y}" x2="${centerX + halfSpan}" y2="${y}"/>`;
   if (!isPlus) return horizontal;
   return `${horizontal}
-        <line x1="50" y1="${y - 6}" x2="50" y2="${y + 6}"/>`;
+        <line x1="${centerX}" y1="${y - halfSpan}" x2="${centerX}" y2="${y + halfSpan}"/>`;
 }
 
 function buildDefaultComponentSvg() {
@@ -3737,15 +3931,16 @@ function buildCurrentSourceSvg() {
 function buildOpAmpSvg(options = {}) {
   const showMarkers = options.showOpAmpMarkers !== false;
   const plusOnTop = options.opAmpPlusOnTop !== false;
-  const topMarker = showMarkers ? buildOpAmpMarkerSvg(40, plusOnTop) : "";
-  const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop) : "";
+  const markerCenterX = 70;
+  const topMarker = showMarkers ? buildOpAmpMarkerSvg(40, plusOnTop, markerCenterX) : "";
+  const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop, markerCenterX) : "";
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 160">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
     <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-      <line x1="0" y1="40" x2="34" y2="40"/>
-      <line x1="0" y1="120" x2="34" y2="120"/>
-      <line x1="166" y1="80" x2="200" y2="80"/>
-      <polygon points="34,16 34,144 166,80"/>
+      <line x1="0" y1="40" x2="48" y2="40"/>
+      <line x1="0" y1="120" x2="48" y2="120"/>
+      <line x1="192" y1="80" x2="240" y2="80"/>
+      <polygon points="48,6 48,154 192,80"/>
       ${topMarker}
       ${bottomMarker}
     </g>
