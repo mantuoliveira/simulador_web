@@ -38,8 +38,6 @@ const DOUBLE_TAP_MAX_DELAY_MS = 320;
 const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
 const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
 const DELETE_BUTTON_HOLD_MS = 2000;
-const EXPORT_FILENAME_PREFIX = "circuito";
-const EXPORT_TRIM_PADDING_PX = 12;
 const SIMULATION_BUTTON_ICONS = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10-6.5z"/></svg>',
   running:
@@ -284,13 +282,15 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
 const COMPONENT_BEHAVIORS = {
   voltage_source: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
-    buildSvg: () => buildVoltageSourceSvg(),
+    buildSvg: (options = {}) => buildVoltageSourceSvg(options),
     formatValue: (component) => formatVoltage(component.value),
     valueFromNormalized: (normalized) => roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
+    drawSpriteOverlay: (component, renderTarget) =>
+      drawVoltageSourcePolarityMarkers(renderTarget, component),
     getCurrentArrowLayout: (component, geometry) => ({
       sideSign: getPointProjectionSideSign(
         getCardinalValueLabelAnchor(component, 1.62),
@@ -373,7 +373,7 @@ const COMPONENT_BEHAVIORS = {
           terminalPair.has(OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX))
       );
     },
-    drawSpriteOverlay: (component) => drawOpAmpInputMarkers(component),
+    drawSpriteOverlay: (component, renderTarget) => drawOpAmpInputMarkers(renderTarget, component),
     swapControl: {
       title: "Trocar entradas do amp op",
       ariaLabel: "Trocar entradas do amp op",
@@ -530,8 +530,7 @@ const appEls = {
   wheelTitle: document.getElementById("wheel-title"),
 };
 
-let ctx = appEls.canvas.getContext("2d");
-let dpr = Math.max(1, window.devicePixelRatio || 1);
+const mainRenderTarget = createRenderTarget(appEls.canvas);
 let lastCanvasW = 0;
 let lastCanvasH = 0;
 let statusTimer = null;
@@ -561,22 +560,54 @@ const deleteButtonHoldState = {
 
 const spriteMap = loadSprites();
 
-buildComponentStrip();
-setupCanvas();
-setupButtons();
-setupKeyboardShortcuts();
-setupCanvasGestures();
-setupWheelGestures();
-setupNativeZoomGuards();
-setupServiceWorker();
-setupRenderLoop();
-updateSelectionUi();
+function createRenderTarget(
+  canvas,
+  {
+    width = Math.max(1, Math.floor(canvas?.clientWidth || canvas?.width || 1)),
+    height = Math.max(1, Math.floor(canvas?.clientHeight || canvas?.height || 1)),
+    dpr = Math.max(1, window.devicePixelRatio || 1),
+  } = {}
+) {
+  const context = canvas?.getContext("2d");
+  if (!context) {
+    throw new Error("canvas context unavailable");
+  }
+
+  return {
+    canvas,
+    context,
+    width,
+    height,
+    dpr,
+  };
+}
+
+function resizeRenderTarget(renderTarget, width, height, nextDpr) {
+  renderTarget.width = width;
+  renderTarget.height = height;
+  renderTarget.dpr = Math.max(1, nextDpr || 1);
+
+  const pixelWidth = Math.max(1, Math.floor(width * renderTarget.dpr));
+  const pixelHeight = Math.max(1, Math.floor(height * renderTarget.dpr));
+  if (renderTarget.canvas.width !== pixelWidth) {
+    renderTarget.canvas.width = pixelWidth;
+  }
+  if (renderTarget.canvas.height !== pixelHeight) {
+    renderTarget.canvas.height = pixelHeight;
+  }
+
+  return {
+    pixelWidth,
+    pixelHeight,
+  };
+}
 
 function loadSprites() {
   const sprites = {};
   for (const type of COMPONENT_ORDER) {
     const svg = buildSvgForType(type, {
       showOpAmpMarkers: type !== "op_amp",
+      showPolarityMarkers: type !== "voltage_source",
     });
     const image = new Image();
     image.src = svgToDataUri(svg);
@@ -637,9 +668,9 @@ function resizeCanvas() {
   const rect = appEls.canvas.getBoundingClientRect();
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
-  dpr = Math.max(1, window.devicePixelRatio || 1);
-  const pixelWidth = Math.max(1, Math.floor(width * dpr));
-  const pixelHeight = Math.max(1, Math.floor(height * dpr));
+  const nextDpr = Math.max(1, window.devicePixelRatio || 1);
+  const pixelWidth = Math.max(1, Math.floor(width * nextDpr));
+  const pixelHeight = Math.max(1, Math.floor(height * nextDpr));
 
   if (
     width === lastCanvasW &&
@@ -647,12 +678,12 @@ function resizeCanvas() {
     appEls.canvas.width === pixelWidth &&
     appEls.canvas.height === pixelHeight
   ) {
+    resizeRenderTarget(mainRenderTarget, width, height, nextDpr);
     requestRender(true);
     return;
   }
 
-  appEls.canvas.width = pixelWidth;
-  appEls.canvas.height = pixelHeight;
+  resizeRenderTarget(mainRenderTarget, width, height, nextDpr);
 
   if (lastCanvasW === 0 && lastCanvasH === 0) {
     state.camera.offsetX = width * 0.5;
@@ -735,184 +766,6 @@ function setSimulationButtonState(isRunning) {
   appEls.simulateBtn.title = isRunning ? "Pausar simulacao" : "Iniciar simulacao";
   appEls.simulateBtn.setAttribute("aria-label", isRunning ? "Pausar simulacao" : "Iniciar simulacao");
   appEls.simulateBtn.setAttribute("aria-pressed", isRunning ? "true" : "false");
-}
-
-async function handleExportAction() {
-  if (state.components.length === 0) {
-    showStatus("Adicione um componente para exportar", true);
-    return;
-  }
-
-  try {
-    const blob = await exportCircuitBlob();
-    const fileName = buildExportFileName();
-    if (await tryShareExport(blob, fileName)) {
-      showStatus("PNG pronto para compartilhar");
-      return;
-    }
-
-    downloadBlob(blob, fileName);
-    showStatus("PNG exportado");
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      return;
-    }
-    showStatus("Falha ao exportar PNG", true);
-  }
-}
-
-async function exportCircuitBlob() {
-  const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
-  const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
-  const exportDpr = Math.max(1, window.devicePixelRatio || 1);
-  const exportCanvas = document.createElement("canvas");
-  exportCanvas.width = Math.max(1, Math.floor(width * exportDpr));
-  exportCanvas.height = Math.max(1, Math.floor(height * exportDpr));
-
-  const exportCtx = exportCanvas.getContext("2d");
-  if (!exportCtx) {
-    throw new Error("export context unavailable");
-  }
-
-  const previousCtx = ctx;
-  const previousDpr = dpr;
-
-  ctx = exportCtx;
-  dpr = exportDpr;
-
-  try {
-    drawScene({
-      background: "transparent",
-      showGrid: false,
-      showSelection: false,
-      showPendingTerminal: false,
-    });
-  } finally {
-    ctx = previousCtx;
-    dpr = previousDpr;
-  }
-
-  const trimmedCanvas = trimCanvas(exportCanvas, Math.ceil(exportDpr * EXPORT_TRIM_PADDING_PX));
-  return canvasToBlob(trimmedCanvas, "image/png");
-}
-
-function canvasToBlob(canvas, type) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-        return;
-      }
-
-      reject(new Error("blob export failed"));
-    }, type);
-  });
-}
-
-async function tryShareExport(blob, fileName) {
-  const isMobile = window.matchMedia?.("(pointer: coarse)").matches;
-  if (!isMobile || !navigator.share || typeof File === "undefined") {
-    return false;
-  }
-
-  try {
-    const file = new File([blob], fileName, { type: "image/png" });
-    if (navigator.canShare && !navigator.canShare({ files: [file] })) {
-      return false;
-    }
-
-    await navigator.share({
-      files: [file],
-      title: "Circuito",
-    });
-    return true;
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw error;
-    }
-    return false;
-  }
-}
-
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 1000);
-}
-
-function buildExportFileName() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  const seconds = String(now.getSeconds()).padStart(2, "0");
-  return `${EXPORT_FILENAME_PREFIX}-${year}${month}${day}-${hours}${minutes}${seconds}.png`;
-}
-
-function trimCanvas(sourceCanvas, paddingPx = 0) {
-  const sourceCtx = sourceCanvas.getContext("2d");
-  if (!sourceCtx) {
-    return sourceCanvas;
-  }
-
-  const { width, height } = sourceCanvas;
-  const imageData = sourceCtx.getImageData(0, 0, width, height);
-  const { data } = imageData;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const alpha = data[(y * width + x) * 4 + 3];
-      if (alpha === 0) continue;
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  }
-
-  if (maxX < minX || maxY < minY) {
-    return sourceCanvas;
-  }
-
-  const left = Math.max(0, minX - paddingPx);
-  const top = Math.max(0, minY - paddingPx);
-  const right = Math.min(width - 1, maxX + paddingPx);
-  const bottom = Math.min(height - 1, maxY + paddingPx);
-  const trimmedCanvas = document.createElement("canvas");
-  trimmedCanvas.width = right - left + 1;
-  trimmedCanvas.height = bottom - top + 1;
-
-  const trimmedCtx = trimmedCanvas.getContext("2d");
-  if (!trimmedCtx) {
-    return sourceCanvas;
-  }
-
-  trimmedCtx.drawImage(
-    sourceCanvas,
-    left,
-    top,
-    trimmedCanvas.width,
-    trimmedCanvas.height,
-    0,
-    0,
-    trimmedCanvas.width,
-    trimmedCanvas.height
-  );
-
-  return trimmedCanvas;
 }
 
 function setupDeleteButtonGestures() {
@@ -1497,7 +1350,7 @@ function renderLoop() {
   renderState.rafId = null;
   if (document.hidden) return;
 
-  drawScene();
+  drawScene({}, mainRenderTarget);
   renderState.dirty = false;
 
   if (isHighFpsInteractionActive()) {
@@ -1508,9 +1361,8 @@ function renderLoop() {
   scheduleRender(false);
 }
 
-function drawScene(options = {}) {
-  const width = appEls.canvas.clientWidth;
-  const height = appEls.canvas.clientHeight;
+function drawScene(options = {}, renderTarget = mainRenderTarget) {
+  const { context, dpr, width, height } = renderTarget;
   const {
     background = "clear",
     showGrid = true,
@@ -1518,41 +1370,42 @@ function drawScene(options = {}) {
     showPendingTerminal = true,
   } = options;
 
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, width, height);
 
   if (background === "white") {
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
   }
 
   if (showGrid) {
-    drawGrid(width, height);
+    drawGrid(renderTarget);
   }
 
-  drawWires(showSelection);
-  drawComponents(showSelection);
+  drawWires(renderTarget, showSelection);
+  drawComponents(renderTarget, showSelection);
 
   if (showPendingTerminal && state.pendingTerminal) {
     const terminal = getTerminalPosition(state.pendingTerminal.componentId, state.pendingTerminal.terminalIndex);
     if (terminal) {
       const sp = worldToScreen(terminal.x, terminal.y);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(245, 158, 11, 0.2)";
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#f59e0b";
-      ctx.stroke();
+      context.beginPath();
+      context.arc(sp.x, sp.y, 8, 0, Math.PI * 2);
+      context.fillStyle = "rgba(245, 158, 11, 0.2)";
+      context.fill();
+      context.lineWidth = 2;
+      context.strokeStyle = "#f59e0b";
+      context.stroke();
     }
   }
 
   if (state.simulationActive && state.simulationResult?.ok) {
-    drawSimulationAnnotations(state.simulationResult.data);
+    drawSimulationAnnotations(renderTarget, state.simulationResult.data);
   }
 }
 
-function drawGrid(width, height) {
+function drawGrid(renderTarget) {
+  const { context, width, height } = renderTarget;
   const topLeft = screenToWorld(0, 0);
   const bottomRight = screenToWorld(width, height);
 
@@ -1562,43 +1415,45 @@ function drawGrid(width, height) {
   const maxY = Math.ceil(bottomRight.y) + 1;
 
   const r = Math.max(0.8, Math.min(1.8, state.camera.zoom * 1.15));
-  ctx.fillStyle = "rgba(15, 23, 42, 0.2)";
+  context.fillStyle = "rgba(15, 23, 42, 0.2)";
 
   for (let x = minX; x <= maxX; x += 1) {
     for (let y = minY; y <= maxY; y += 1) {
       const sp = worldToScreen(x, y);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      context.beginPath();
+      context.arc(sp.x, sp.y, r, 0, Math.PI * 2);
+      context.fill();
     }
   }
 }
 
-function drawWires(showSelection = true) {
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+function drawWires(renderTarget, showSelection = true) {
+  const { context } = renderTarget;
+  context.lineCap = "round";
+  context.lineJoin = "round";
 
   for (const wire of state.wires) {
     if (!wire.path || wire.path.length < 2) continue;
 
-    ctx.beginPath();
+    context.beginPath();
     wire.path.forEach((point, index) => {
       const sp = worldToScreen(point.x, point.y);
       if (index === 0) {
-        ctx.moveTo(sp.x, sp.y);
+        context.moveTo(sp.x, sp.y);
       } else {
-        ctx.lineTo(sp.x, sp.y);
+        context.lineTo(sp.x, sp.y);
       }
     });
 
     const isSelected = showSelection && state.selectedWireId === wire.id;
-    ctx.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
-    ctx.strokeStyle = isSelected ? "#ea580c" : "#0f172a";
-    ctx.stroke();
+    context.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
+    context.strokeStyle = isSelected ? "#ea580c" : "#0f172a";
+    context.stroke();
   }
 }
 
-function drawComponents(showSelection = true) {
+function drawComponents(renderTarget, showSelection = true) {
+  const { context } = renderTarget;
   for (const component of state.components) {
     const def = COMPONENT_DEFS[component.type];
     const behavior = getComponentBehavior(component.type);
@@ -1609,27 +1464,38 @@ function drawComponents(showSelection = true) {
     const renderOffsetX = worldLengthToScreen(def.renderOffsetX || 0);
     const renderOffsetY = worldLengthToScreen(def.renderOffsetY || 0);
 
-    ctx.save();
-    ctx.translate(center.x, center.y);
-    ctx.rotate(degToRad(component.rotation));
-    behavior.applySpriteTransform(ctx, component);
+    context.save();
+    context.translate(center.x, center.y);
+    context.rotate(degToRad(component.rotation));
+    behavior.applySpriteTransform(context, component);
 
     if (sprite?.complete) {
-      ctx.drawImage(sprite, -width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
+      context.drawImage(
+        sprite,
+        -width / 2 + renderOffsetX,
+        -height / 2 + renderOffsetY,
+        width,
+        height
+      );
     } else if (width > 0 && height > 0) {
-      ctx.fillStyle = "#dbe4ef";
-      ctx.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
+      context.fillStyle = "#dbe4ef";
+      context.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
     }
 
-    behavior.drawSpriteOverlay(component);
+    behavior.drawSpriteOverlay(component, renderTarget);
 
     if (showSelection && state.selectedComponentId === component.id) {
-      ctx.strokeStyle = "#0ea5a8";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-width / 2 + renderOffsetX - 4, -height / 2 + renderOffsetY - 4, width + 8, height + 8);
+      context.strokeStyle = "#0ea5a8";
+      context.lineWidth = 2;
+      context.strokeRect(
+        -width / 2 + renderOffsetX - 4,
+        -height / 2 + renderOffsetY - 4,
+        width + 8,
+        height + 8
+      );
     }
 
-    ctx.restore();
+    context.restore();
 
     const terminalCount = def.terminals.length;
     for (let i = 0; i < terminalCount; i += 1) {
@@ -1644,25 +1510,25 @@ function drawComponents(showSelection = true) {
         state.pendingTerminal.terminalIndex === i;
       const radius = getTerminalRenderRadius(component.type);
 
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle =
+      context.beginPath();
+      context.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
+      context.fillStyle =
         component.type === "junction" ? "#0f172a" : isPending ? "#f59e0b" : connected ? "#0f172a" : "#f8fafc";
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = component.type === "junction" || connected ? "#0f172a" : "#334155";
-      ctx.stroke();
+      context.fill();
+      context.lineWidth = 1.5;
+      context.strokeStyle = component.type === "junction" || connected ? "#0f172a" : "#334155";
+      context.stroke();
     }
 
     if (def.editable && def.showValueLabel !== false) {
       const labelPoint = getValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = formatComponentValue(component);
-      ctx.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
-      ctx.fillStyle = "#0f172a";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(valueText, screenPoint.x, screenPoint.y);
+      context.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
+      context.fillStyle = "#0f172a";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(valueText, screenPoint.x, screenPoint.y);
     }
   }
 }
@@ -1675,7 +1541,8 @@ function getTerminalRenderRadius(componentType) {
   return clamp(worldLengthToScreen(gridRadius), minRadius, maxRadius);
 }
 
-function drawOpAmpInputMarkers(component) {
+function drawOpAmpInputMarkers(renderTarget, component) {
+  const { context } = renderTarget;
   const def = COMPONENT_DEFS.op_amp;
   const { plusIndex, minusIndex } = getOpAmpInputTerminalIndices(component);
   const plusBase = def.terminals[plusIndex];
@@ -1684,17 +1551,19 @@ function drawOpAmpInputMarkers(component) {
 
   const markerOffsetX = 1.25;
   const halfSpan = Math.max(4.8, worldLengthToScreen(0.18));
-  ctx.strokeStyle = "#0f172a";
-  ctx.lineWidth = Math.max(2.2, state.camera.zoom * 2.2);
-  ctx.lineCap = "round";
+  context.strokeStyle = "#0f172a";
+  context.lineWidth = Math.max(2.2, state.camera.zoom * 2.2);
+  context.lineCap = "round";
 
   drawOpAmpMarkerAt(
+    context,
     worldLengthToScreen(plusBase[0] + markerOffsetX),
     worldLengthToScreen(plusBase[1]),
     halfSpan,
     true
   );
   drawOpAmpMarkerAt(
+    context,
     worldLengthToScreen(minusBase[0] + markerOffsetX),
     worldLengthToScreen(minusBase[1]),
     halfSpan,
@@ -1702,47 +1571,77 @@ function drawOpAmpInputMarkers(component) {
   );
 }
 
-function drawOpAmpMarkerAt(x, y, halfSpan, isPlus) {
-  ctx.beginPath();
-  ctx.moveTo(x - halfSpan, y);
-  ctx.lineTo(x + halfSpan, y);
+function drawOpAmpMarkerAt(context, x, y, halfSpan, isPlus) {
+  context.beginPath();
+  context.moveTo(x - halfSpan, y);
+  context.lineTo(x + halfSpan, y);
 
   if (isPlus) {
-    ctx.moveTo(x, y - halfSpan);
-    ctx.lineTo(x, y + halfSpan);
+    context.moveTo(x, y - halfSpan);
+    context.lineTo(x, y + halfSpan);
   }
 
-  ctx.stroke();
+  context.stroke();
 }
 
-function drawSimulationAnnotations(data) {
+function drawVoltageSourcePolarityMarkers(renderTarget, component) {
+  const { context } = renderTarget;
+  const rotationRad = degToRad(component.rotation);
+  const offset = worldLengthToScreen(0.35);
+  const halfSpan = Math.max(6, worldLengthToScreen(0.22));
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  const minusCenterX = -offset * cos;
+  const minusCenterY = -offset * sin;
+  const plusCenterX = offset * cos;
+  const plusCenterY = offset * sin;
+
+  context.save();
+  context.rotate(-rotationRad);
+  context.strokeStyle = "#0f172a";
+  context.lineWidth = Math.max(4.2, state.camera.zoom * 4.2);
+  context.lineCap = "round";
+
+  context.beginPath();
+  context.moveTo(minusCenterX - halfSpan, minusCenterY);
+  context.lineTo(minusCenterX + halfSpan, minusCenterY);
+  context.moveTo(plusCenterX - halfSpan, plusCenterY);
+  context.lineTo(plusCenterX + halfSpan, plusCenterY);
+  context.moveTo(plusCenterX, plusCenterY - halfSpan);
+  context.lineTo(plusCenterX, plusCenterY + halfSpan);
+  context.stroke();
+  context.restore();
+}
+
+function drawSimulationAnnotations(renderTarget, data) {
+  const { context } = renderTarget;
   if (!data) return;
 
   for (const marker of data.nodeMarkers) {
     const sp = worldToScreen(marker.x, marker.y);
     const label = `${formatVoltage(marker.voltage)}`;
 
-    ctx.font = '12px "Avenir Next", sans-serif';
-    const textW = ctx.measureText(label).width;
+    context.font = '12px "Avenir Next", sans-serif';
+    const textW = context.measureText(label).width;
     const padX = 7;
     const boxW = textW + padX * 2;
     const boxH = 20;
     const placement = getNodeMarkerPlacement(sp, boxW, boxH, marker.labelDirection);
 
-    ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
-    roundedRect(ctx, placement.boxX, placement.boxY, boxW, boxH, 8);
-    ctx.fill();
+    context.fillStyle = "rgba(15, 23, 42, 0.86)";
+    roundedRect(context, placement.boxX, placement.boxY, boxW, boxH, 8);
+    context.fill();
 
-    ctx.fillStyle = "#f8fafc";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, placement.textX, placement.textY);
+    context.fillStyle = "#f8fafc";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, placement.textX, placement.textY);
   }
 
   for (const component of state.components) {
     const current = data.componentCurrents.get(component.id);
     if (current == null || component.type === "ground") continue;
-    drawCurrentArrow(component, current);
+    drawCurrentArrow(renderTarget, component, current);
   }
 }
 
@@ -1788,7 +1687,8 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") 
   };
 }
 
-function drawCurrentArrow(component, current) {
+function drawCurrentArrow(renderTarget, component, current) {
+  const { context } = renderTarget;
   const def = COMPONENT_DEFS[component.type];
   if (def.terminals.length < 2) return;
   const behavior = getComponentBehavior(component.type);
@@ -1842,36 +1742,36 @@ function drawCurrentArrow(component, current) {
   const s = worldToScreen(start.x, start.y);
   const e = worldToScreen(end.x, end.y);
 
-  ctx.strokeStyle = "#dc2626";
-  ctx.fillStyle = "#dc2626";
-  ctx.lineWidth = Math.max(2.8, state.camera.zoom * 3.2);
+  context.strokeStyle = "#dc2626";
+  context.fillStyle = "#dc2626";
+  context.lineWidth = Math.max(2.8, state.camera.zoom * 3.2);
 
-  ctx.beginPath();
-  ctx.moveTo(s.x, s.y);
-  ctx.lineTo(e.x, e.y);
-  ctx.stroke();
+  context.beginPath();
+  context.moveTo(s.x, s.y);
+  context.lineTo(e.x, e.y);
+  context.stroke();
 
   const arrowLen = Math.max(12, state.camera.zoom * 14);
   const arrowSpread = 0.46;
   const angle = Math.atan2(e.y - s.y, e.x - s.x);
-  const tipAdvance = Math.max(2.2, ctx.lineWidth * 0.9);
+  const tipAdvance = Math.max(2.2, context.lineWidth * 0.9);
   const tipX = e.x + Math.cos(angle) * tipAdvance;
   const tipY = e.y + Math.sin(angle) * tipAdvance;
-  ctx.beginPath();
-  ctx.moveTo(tipX, tipY);
-  ctx.lineTo(
+  context.beginPath();
+  context.moveTo(tipX, tipY);
+  context.lineTo(
     tipX - arrowLen * Math.cos(angle - arrowSpread),
     tipY - arrowLen * Math.sin(angle - arrowSpread)
   );
-  ctx.lineTo(
+  context.lineTo(
     tipX - arrowLen * Math.cos(angle + arrowSpread),
     tipY - arrowLen * Math.sin(angle + arrowSpread)
   );
-  ctx.closePath();
-  ctx.fill();
+  context.closePath();
+  context.fill();
 
   const text = formatCurrent(signed);
-  ctx.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
+  context.font = `${Math.max(14, 14 * state.camera.zoom)}px "Avenir Next", sans-serif`;
   const textOffset = Math.max(12, state.camera.zoom * 13) + (arrowLayout.textOffsetExtra || 0);
 
   const arrowMidX = (s.x + e.x) * 0.5;
@@ -1897,10 +1797,10 @@ function drawCurrentArrow(component, current) {
     textY -= textGap * 0.7;
   }
 
-  ctx.fillStyle = "#7f1d1d";
-  ctx.textAlign = textAlign;
-  ctx.textBaseline = textBaseline;
-  ctx.fillText(text, textX, textY);
+  context.fillStyle = "#7f1d1d";
+  context.textAlign = textAlign;
+  context.textBaseline = textBaseline;
+  context.fillText(text, textX, textY);
 }
 
 function startSingleTouch(touch) {
@@ -2725,271 +2625,6 @@ function getWiresForComponent(componentId) {
   return getWiresForComponentFromCollection(state.wires, componentId);
 }
 
-function routeWireInCircuit(circuit, start, end, options = {}) {
-  const blocked = new Set();
-  const occupiedEdges = buildOccupiedWireEdgeSetForWires(circuit.wires, options.ignoreWireIds);
-  const nodeProximity = buildTerminalProximitySetForComponents(circuit.components, start, end);
-
-  for (const component of circuit.components) {
-    const cells = getObstacleCells(component);
-    for (const cell of cells) {
-      blocked.add(key(cell.x, cell.y));
-    }
-  }
-
-  blocked.delete(key(start.x, start.y));
-  blocked.delete(key(end.x, end.y));
-
-  const bounds = routeBoundsForComponents(circuit.components, start, end);
-  return findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, {
-    preferredStartDirection: options.startDirection || null,
-    preferredEndDirection: options.endDirection || null,
-  });
-}
-
-function routeWire(start, end, options = {}) {
-  return routeWireInCircuit(state, start, end, options);
-}
-
-function routeBoundsForComponents(components, start, end) {
-  let minX = Math.min(start.x, end.x);
-  let minY = Math.min(start.y, end.y);
-  let maxX = Math.max(start.x, end.x);
-  let maxY = Math.max(start.y, end.y);
-
-  for (const component of components) {
-    const fp = getFootprintExtents(component);
-    minX = Math.min(minX, Math.floor(component.x - fp.left - 2));
-    maxX = Math.max(maxX, Math.ceil(component.x + fp.right + 2));
-    minY = Math.min(minY, Math.floor(component.y - fp.up - 2));
-    maxY = Math.max(maxY, Math.ceil(component.y + fp.down + 2));
-  }
-
-  const pad = 10;
-  return {
-    minX: minX - pad,
-    maxX: maxX + pad,
-    minY: minY - pad,
-    maxY: maxY + pad,
-  };
-}
-
-function routeBounds(start, end) {
-  return routeBoundsForComponents(state.components, start, end);
-}
-
-function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, preferences = {}) {
-  const startKey = key(start.x, start.y);
-  const endKey = key(end.x, end.y);
-  const startStateKey = pathStateKey(start, null);
-  const open = new Set([startStateKey]);
-  const cameFrom = new Map();
-  const gScore = new Map([[startStateKey, 0]]);
-  const fScore = new Map([[startStateKey, manhattan(start, end)]]);
-  const preferredStartDirection = preferences.preferredStartDirection || null;
-  const preferredEndDirection = preferences.preferredEndDirection || null;
-
-  while (open.size > 0) {
-    let currentStateKey = null;
-    let best = Infinity;
-
-    for (const candidate of open) {
-      const val = fScore.get(candidate) ?? Infinity;
-      if (val < best) {
-        best = val;
-        currentStateKey = candidate;
-      }
-    }
-
-    if (!currentStateKey) break;
-
-    const currentState = parsePathStateKey(currentStateKey);
-    const current = currentState.point;
-    const currentKey = key(current.x, current.y);
-
-    if (currentKey === endKey) {
-      return rebuildPath(cameFrom, currentStateKey);
-    }
-
-    open.delete(currentStateKey);
-
-    const neighbors = [
-      { x: current.x + 1, y: current.y },
-      { x: current.x - 1, y: current.y },
-      { x: current.x, y: current.y + 1 },
-      { x: current.x, y: current.y - 1 },
-    ];
-
-    for (const next of neighbors) {
-      if (
-        next.x < bounds.minX ||
-        next.x > bounds.maxX ||
-        next.y < bounds.minY ||
-        next.y > bounds.maxY
-      ) {
-        continue;
-      }
-
-      const nk = key(next.x, next.y);
-      if (blocked.has(nk) && nk !== endKey) continue;
-
-      const nextDirection = stepDirection(current, next);
-      const edgePenalty = occupiedEdges.has(edgeKey(current, next)) ? OCCUPIED_WIRE_EDGE_PENALTY : 0;
-      const proximityPenalty =
-        nk !== startKey && nk !== endKey && nodeProximity.has(nk) ? NODE_PROXIMITY_PENALTY : 0;
-      const turnPenalty =
-        currentState.direction && currentState.direction !== nextDirection ? TURN_PENALTY : 0;
-      const startDirectionPenalty =
-        !currentState.direction &&
-        preferredStartDirection &&
-        nextDirection !== preferredStartDirection
-          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
-          : 0;
-      const endDirectionPenalty =
-        nk === endKey && preferredEndDirection && nextDirection !== preferredEndDirection
-          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
-          : 0;
-      const nextStateKey = pathStateKey(next, nextDirection);
-      const tentative =
-        (gScore.get(currentStateKey) ?? Infinity) +
-        1 +
-        edgePenalty +
-        proximityPenalty +
-        turnPenalty +
-        startDirectionPenalty +
-        endDirectionPenalty;
-      if (tentative < (gScore.get(nextStateKey) ?? Infinity)) {
-        cameFrom.set(nextStateKey, currentStateKey);
-        gScore.set(nextStateKey, tentative);
-        fScore.set(nextStateKey, tentative + manhattan(next, end));
-        open.add(nextStateKey);
-      }
-    }
-  }
-
-  return null;
-}
-
-function buildOccupiedWireEdgeSetForWires(wires, ignoreWireIds = new Set()) {
-  const occupied = new Set();
-
-  for (const wire of wires) {
-    if (ignoreWireIds.has(wire.id)) continue;
-    if (!Array.isArray(wire.path) || wire.path.length < 2) continue;
-
-    for (let i = 0; i < wire.path.length - 1; i += 1) {
-      const start = wire.path[i];
-      const end = wire.path[i + 1];
-
-      if (start.x === end.x) {
-        const step = start.y < end.y ? 1 : -1;
-        for (let y = start.y; y !== end.y; y += step) {
-          occupied.add(edgeKey({ x: start.x, y }, { x: start.x, y: y + step }));
-        }
-        continue;
-      }
-
-      if (start.y === end.y) {
-        const step = start.x < end.x ? 1 : -1;
-        for (let x = start.x; x !== end.x; x += step) {
-          occupied.add(edgeKey({ x, y: start.y }, { x: x + step, y: start.y }));
-        }
-      }
-    }
-  }
-
-  return occupied;
-}
-
-function buildOccupiedWireEdgeSet(ignoreWireIds = new Set()) {
-  return buildOccupiedWireEdgeSetForWires(state.wires, ignoreWireIds);
-}
-
-function buildTerminalProximitySetForComponents(components, start, end) {
-  const protectedKeys = new Set([key(start.x, start.y), key(end.x, end.y)]);
-  const proximity = new Set();
-
-  for (const component of components) {
-    const def = COMPONENT_DEFS[component.type];
-    if (!def) continue;
-
-    for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
-      const terminal = getTerminalPositionForComponents(components, component.id, terminalIndex);
-      if (!terminal) continue;
-
-      const terminalKeyValue = key(terminal.x, terminal.y);
-      if (protectedKeys.has(terminalKeyValue)) continue;
-
-      const neighbors = [
-        { x: terminal.x + 1, y: terminal.y },
-        { x: terminal.x - 1, y: terminal.y },
-        { x: terminal.x, y: terminal.y + 1 },
-        { x: terminal.x, y: terminal.y - 1 },
-      ];
-
-      for (const neighbor of neighbors) {
-        const neighborKey = key(neighbor.x, neighbor.y);
-        if (!protectedKeys.has(neighborKey)) {
-          proximity.add(neighborKey);
-        }
-      }
-    }
-  }
-
-  return proximity;
-}
-
-function buildTerminalProximitySet(start, end) {
-  return buildTerminalProximitySetForComponents(state.components, start, end);
-}
-
-function rebuildPath(cameFrom, currentKey) {
-  const path = [parsePathStateKey(currentKey).point];
-  let ck = currentKey;
-
-  while (cameFrom.has(ck)) {
-    ck = cameFrom.get(ck);
-    path.push(parsePathStateKey(ck).point);
-  }
-
-  path.reverse();
-  return simplifyOrthogonalPath(path);
-}
-
-function simplifyOrthogonalPath(path) {
-  if (path.length <= 2) return path;
-  const simplified = [path[0]];
-
-  for (let i = 1; i < path.length - 1; i += 1) {
-    const prev = path[i - 1];
-    const curr = path[i];
-    const next = path[i + 1];
-    const dx1 = curr.x - prev.x;
-    const dy1 = curr.y - prev.y;
-    const dx2 = next.x - curr.x;
-    const dy2 = next.y - curr.y;
-
-    if (dx1 === dx2 && dy1 === dy2) {
-      continue;
-    }
-
-    simplified.push(curr);
-  }
-
-  simplified.push(path[path.length - 1]);
-  return simplified;
-}
-
-function getObstacleCells(component) {
-  const def = COMPONENT_DEFS[component.type];
-  const cells = [];
-  for (const base of def.obstacleCells) {
-    const rotated = rotateOffset(base[0], base[1], component.rotation);
-    cells.push({ x: component.x + rotated.x, y: component.y + rotated.y });
-  }
-  return cells;
-}
-
 function pickTerminal(worldX, worldY, threshold) {
   for (let i = state.components.length - 1; i >= 0; i -= 1) {
     const component = state.components[i];
@@ -3066,18 +2701,6 @@ function pointOnSegment(point, start, end) {
   if (start.x === end.x) return point.x === start.x;
   if (start.y === end.y) return point.y === start.y;
   return false;
-}
-
-function sameGridPoint(a, b) {
-  return !!a && !!b && a.x === b.x && a.y === b.y;
-}
-
-function clonePoint(point) {
-  return { x: point.x, y: point.y };
-}
-
-function clonePath(path) {
-  return path.map(clonePoint);
 }
 
 function cloneTerminalRef(ref) {
@@ -3636,1026 +3259,6 @@ function getValueLabelAnchor(component) {
   return getComponentBehavior(component.type).getValueLabelAnchor(component);
 }
 
-function simulateCircuit({ components, wires, previousSolution = null }) {
-  if (components.length === 0) {
-    return { ok: false, message: "Adicione componentes antes de simular" };
-  }
-
-  const terminals = [];
-  const terminalPosition = new Map();
-
-  for (const component of components) {
-    const def = COMPONENT_DEFS[component.type];
-    for (let i = 0; i < def.terminals.length; i += 1) {
-      const tKey = terminalKey(component.id, i);
-      terminals.push(tKey);
-      terminalPosition.set(tKey, getTerminalPositionForComponents(components, component.id, i));
-    }
-  }
-
-  const dsu = new DisjointSet(terminals);
-
-  for (const wire of wires) {
-    dsu.union(terminalKey(wire.from.componentId, wire.from.terminalIndex), terminalKey(wire.to.componentId, wire.to.terminalIndex));
-  }
-
-  const groundTerminals = components
-    .filter((component) => component.type === "ground")
-    .map((component) => terminalKey(component.id, 0));
-
-  if (groundTerminals.length === 0) {
-    return { ok: false, message: "Inclua pelo menos um terra" };
-  }
-
-  for (let i = 1; i < groundTerminals.length; i += 1) {
-    dsu.union(groundTerminals[0], groundTerminals[i]);
-  }
-
-  const groundRoot = dsu.find(groundTerminals[0]);
-
-  const rootByTerminal = new Map();
-  for (const t of terminals) {
-    rootByTerminal.set(t, dsu.find(t));
-  }
-
-  const edges = new Map();
-  function addEdge(a, b) {
-    if (!edges.has(a)) edges.set(a, new Set());
-    if (!edges.has(b)) edges.set(b, new Set());
-    edges.get(a).add(b);
-    edges.get(b).add(a);
-  }
-
-  for (const component of components) {
-    for (const [fromIndex, toIndex] of getReachabilityTerminalPairs(component)) {
-      const n0 = rootByTerminal.get(terminalKey(component.id, fromIndex));
-      const n1 = rootByTerminal.get(terminalKey(component.id, toIndex));
-      if (!n0 || !n1) continue;
-      addEdge(n0, n1);
-    }
-  }
-
-  const reachableNodes = new Set([groundRoot]);
-  const queue = [groundRoot];
-
-  while (queue.length > 0) {
-    const node = queue.shift();
-    const neighbors = edges.get(node);
-    if (!neighbors) continue;
-
-    for (const nb of neighbors) {
-      if (!reachableNodes.has(nb)) {
-        reachableNodes.add(nb);
-        queue.push(nb);
-      }
-    }
-  }
-
-  const activeComponents = components.filter((component) => {
-    if (!isSimulatedBranchComponent(component.type)) return false;
-    const terminalRoots = getComponentTerminalRoots(component, rootByTerminal);
-    if (terminalRoots.length === 0) return false;
-    return terminalRoots.some((root) => reachableNodes.has(root));
-  });
-
-  if (activeComponents.length === 0) {
-    return { ok: false, message: "Nenhum circuito fechado ligado ao terra" };
-  }
-
-  const activeRoots = new Set();
-  for (const component of activeComponents) {
-    for (const root of getComponentTerminalRoots(component, rootByTerminal)) {
-      activeRoots.add(root);
-    }
-  }
-
-  const nonGroundRoots = [...activeRoots].filter((root) => root !== groundRoot);
-  const nodeIndex = new Map(nonGroundRoots.map((root, idx) => [root, idx]));
-
-  const voltageSources = activeComponents.filter((component) => component.type === "voltage_source");
-  const diodes = activeComponents.filter((component) => component.type === "diode");
-  const bjts = activeComponents.filter((component) => component.type === "bjt_npn");
-  const opAmps = activeComponents.filter((component) => component.type === "op_amp");
-
-  const N = nonGroundRoots.length;
-  const M = voltageSources.length;
-  const O = opAmps.length;
-  const size = N + M + O;
-
-  if (size === 0) {
-    return { ok: false, message: "Circuito inválido para MNA" };
-  }
-
-  const getNodeIdx = (root) => {
-    if (root === groundRoot) return -1;
-    return nodeIndex.get(root) ?? -1;
-  };
-
-  const linearSystem = buildLinearMnaSystem(
-    activeComponents,
-    voltageSources,
-    opAmps,
-    rootByTerminal,
-    getNodeIdx,
-    N
-  );
-
-  let solution = null;
-  if (diodes.length > 0 || bjts.length > 0 || opAmps.length > 0) {
-    solution = solveNonlinearCircuit({
-      baseMatrix: linearSystem.A,
-      baseVector: linearSystem.z,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount: N,
-      opAmpRowOffset: N + M,
-      rootByTerminal,
-      getNodeIdx,
-      previousSolution,
-    });
-
-    if (!solution) {
-      return {
-        ok: false,
-        message: "O solver nao convergiu para o circuito nao linear. Revise saturacoes, malhas ideais e entradas flutuantes.",
-      };
-    }
-  } else {
-    solution = solveLinearSystem(linearSystem.A, linearSystem.z);
-    if (!solution) {
-      return {
-        ok: false,
-        message: "Sistema singular. Verifique se o circuito está referenciado ao terra.",
-      };
-    }
-  }
-
-  const nodeVoltageByRoot = new Map();
-  nodeVoltageByRoot.set(groundRoot, 0);
-  for (const root of nonGroundRoots) {
-    nodeVoltageByRoot.set(root, solution[nodeIndex.get(root)]);
-  }
-
-  const componentCurrents = new Map();
-
-  for (const component of activeComponents) {
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const v0 = nodeVoltageByRoot.get(r0) ?? 0;
-    const v1 = nodeVoltageByRoot.get(r1) ?? 0;
-
-    if (component.type === "resistor") {
-      componentCurrents.set(component.id, (v0 - v1) / safeResistance(component.value));
-    } else if (component.type === "current_source") {
-      componentCurrents.set(component.id, component.value || 0);
-    } else if (component.type === "diode") {
-      componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
-    } else if (component.type === "bjt_npn") {
-      const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
-      const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
-      const vBase = nodeVoltageByRoot.get(rBase) ?? 0;
-      const vCollector = nodeVoltageByRoot.get(rCollector) ?? 0;
-      const vEmitter = nodeVoltageByRoot.get(rEmitter) ?? 0;
-      componentCurrents.set(component.id, evaluateBjtModel(component, vBase - vEmitter, vBase - vCollector).ic);
-    }
-  }
-
-  voltageSources.forEach((component, k) => {
-    // Align displayed arrow direction with terminal order (esquerda -> direita).
-    componentCurrents.set(component.id, -solution[N + k]);
-  });
-
-  const markerGroups = new Map();
-  for (const [terminal, root] of rootByTerminal.entries()) {
-    if (!nodeVoltageByRoot.has(root)) continue;
-    const ref = parseTerminalKey(terminal);
-    const labelDirection = ref
-      ? getTerminalLabelDirectionForComponents(components, ref.componentId, ref.terminalIndex)
-      : null;
-    pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal), labelDirection);
-  }
-
-  for (const wire of wires) {
-    if (!Array.isArray(wire.path) || wire.path.length === 0) continue;
-
-    const fromRoot = rootByTerminal.get(terminalKey(wire.from.componentId, wire.from.terminalIndex));
-    const toRoot = rootByTerminal.get(terminalKey(wire.to.componentId, wire.to.terminalIndex));
-    if (!fromRoot || fromRoot !== toRoot || !nodeVoltageByRoot.has(fromRoot)) continue;
-
-    for (const point of wire.path) {
-      pushNodeMarkerGroupPoint(markerGroups, fromRoot, point);
-    }
-  }
-
-  const groundMarkerPoints = dedupeMarkerPoints(
-    groundTerminals.map((terminal) => terminalPosition.get(terminal))
-  );
-
-  const nodeMarkers = [];
-  for (const [root, group] of markerGroups.entries()) {
-    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : group.points;
-    const markerPoint = chooseNodeMarkerAnchor(group.points, markerPoints, group.pointDirections);
-    if (!markerPoint) continue;
-
-    nodeMarkers.push({
-      x: markerPoint.x,
-      y: markerPoint.y,
-      voltage: nodeVoltageByRoot.get(root) ?? 0,
-      labelDirection: markerPoint.labelDirection,
-    });
-  }
-
-  const data = {
-    nodeVoltages: nodeVoltageByRoot,
-    componentCurrents,
-    nodeMarkers,
-    solutionVector: solution.slice(),
-  };
-
-  return { ok: true, data };
-}
-
-function runSimulation() {
-  const result = simulateCircuit({
-    components: state.components,
-    wires: state.wires,
-    previousSolution: state.simulationResult?.data?.solutionVector,
-  });
-
-  state.simulationResult = result.ok ? { ok: true, data: result.data } : null;
-  return result;
-}
-
-function getComponentTerminalRoots(component, rootByTerminal) {
-  const def = COMPONENT_DEFS[component.type];
-  if (!def) return [];
-
-  const roots = [];
-  for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
-    const root = rootByTerminal.get(terminalKey(component.id, terminalIndex));
-    if (root) {
-      roots.push(root);
-    }
-  }
-  return roots;
-}
-
-function pushNodeMarkerGroupPoint(groups, root, point, labelDirection = null) {
-  if (!root || !point) return;
-
-  let group = groups.get(root);
-  if (!group) {
-    group = {
-      points: [],
-      pointKeys: new Set(),
-      pointDirections: new Map(),
-    };
-    groups.set(root, group);
-  }
-
-  const pointKeyValue = key(point.x, point.y);
-  if (!group.pointKeys.has(pointKeyValue)) {
-    group.pointKeys.add(pointKeyValue);
-    group.points.push(clonePoint(point));
-  }
-
-  if (!labelDirection) return;
-
-  let directions = group.pointDirections.get(pointKeyValue);
-  if (!directions) {
-    directions = new Set();
-    group.pointDirections.set(pointKeyValue, directions);
-  }
-  directions.add(labelDirection);
-}
-
-function dedupeMarkerPoints(points) {
-  const unique = [];
-  const seen = new Set();
-
-  for (const point of points) {
-    if (!point) continue;
-
-    const pointKeyValue = key(point.x, point.y);
-    if (seen.has(pointKeyValue)) continue;
-
-    seen.add(pointKeyValue);
-    unique.push(clonePoint(point));
-  }
-
-  return unique;
-}
-
-function chooseNodeMarkerAnchor(geometryPoints, candidatePoints = geometryPoints, pointDirections = new Map()) {
-  // Keep the label attached to a real point on the node instead of the averaged centroid,
-  // which can fall in empty canvas space for large nets.
-  const geometry = dedupeMarkerPoints(geometryPoints);
-  const candidates = dedupeMarkerPoints(candidatePoints);
-  if (!geometry.length || !candidates.length) return null;
-
-  const centroid = geometry.reduce(
-    (acc, point) => ({
-      x: acc.x + point.x,
-      y: acc.y + point.y,
-    }),
-    { x: 0, y: 0 }
-  );
-  centroid.x /= geometry.length;
-  centroid.y /= geometry.length;
-
-  let bestPoint = candidates[0];
-  let bestDistance = distanceSquared(bestPoint, centroid);
-
-  for (let index = 1; index < candidates.length; index += 1) {
-    const candidate = candidates[index];
-    const candidateDistance = distanceSquared(candidate, centroid);
-
-    if (
-      candidateDistance < bestDistance - 1e-9 ||
-      (Math.abs(candidateDistance - bestDistance) <= 1e-9 && isBetterMarkerTieBreak(candidate, bestPoint))
-    ) {
-      bestPoint = candidate;
-      bestDistance = candidateDistance;
-    }
-  }
-
-  return {
-    x: bestPoint.x,
-    y: bestPoint.y,
-    labelDirection: chooseNodeMarkerLabelDirection(bestPoint, pointDirections),
-  };
-}
-
-function distanceSquared(a, b) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function isBetterMarkerTieBreak(candidate, currentBest) {
-  if (candidate.y !== currentBest.y) {
-    return candidate.y < currentBest.y;
-  }
-
-  return candidate.x < currentBest.x;
-}
-
-function chooseNodeMarkerLabelDirection(point, pointDirections) {
-  const directions = pointDirections.get(key(point.x, point.y));
-  if (!directions || directions.size === 0) {
-    return "up";
-  }
-
-  if (directions.has("down") && !directions.has("up")) {
-    return "down";
-  }
-
-  if (directions.has("up") && !directions.has("down")) {
-    return "up";
-  }
-
-  if (directions.has("right") && !directions.has("left")) {
-    return "right";
-  }
-
-  if (directions.has("left") && !directions.has("right")) {
-    return "left";
-  }
-
-  return "up";
-}
-
-function buildLinearMnaSystem(activeComponents, voltageSources, opAmps, rootByTerminal, getNodeIdx, nodeCount) {
-  const size = nodeCount + voltageSources.length + opAmps.length;
-  const A = Array.from({ length: size }, () => Array(size).fill(0));
-  const z = Array(size).fill(0);
-
-  for (const component of activeComponents) {
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
-
-    if (component.type === "resistor") {
-      stampConductance(A, n0, n1, 1 / safeResistance(component.value));
-    }
-
-    if (component.type === "current_source") {
-      const current = component.value || 0;
-      if (n0 >= 0) z[n0] -= current;
-      if (n1 >= 0) z[n1] += current;
-    }
-  }
-
-  voltageSources.forEach((component, index) => {
-    const row = nodeCount + index;
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
-
-    if (n0 >= 0) {
-      A[n0][row] -= 1;
-      A[row][n0] -= 1;
-    }
-
-    if (n1 >= 0) {
-      A[n1][row] += 1;
-      A[row][n1] += 1;
-    }
-
-    z[row] = component.value || 0;
-  });
-
-  opAmps.forEach((component, index) => {
-    const row = nodeCount + voltageSources.length + index;
-    const outputRoot = rootByTerminal.get(terminalKey(component.id, OP_AMP_OUTPUT_TERMINAL_INDEX));
-    const outputNode = getNodeIdx(outputRoot);
-
-    if (outputNode >= 0) {
-      A[outputNode][row] += 1;
-      A[row][outputNode] += 1;
-    }
-  });
-
-  return { A, z };
-}
-
-function solveNonlinearCircuit({
-  baseMatrix,
-  baseVector,
-  diodes,
-  bjts,
-  opAmps,
-  nodeCount,
-  opAmpRowOffset,
-  rootByTerminal,
-  getNodeIdx,
-  previousSolution,
-}) {
-  const size = baseVector.length;
-  const hasPreviousSolution = Array.isArray(previousSolution) && previousSolution.length === size;
-  const linearGuess = solveLinearSystem(baseMatrix, baseVector);
-
-  if (hasPreviousSolution) {
-    const direct = runNewtonIterations(
-      previousSolution.slice(),
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      1
-    );
-    if (direct) {
-      return direct;
-    }
-  }
-
-  if (linearGuess) {
-    const directFromLinear = runNewtonIterations(
-      linearGuess.slice(),
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      1
-    );
-    if (directFromLinear) {
-      return directFromLinear;
-    }
-  }
-
-  let vector =
-    solveLinearSystem(
-      baseMatrix,
-      baseVector.map((value) => value / NEWTON_SOURCE_STEPS)
-    ) || Array(size).fill(0);
-  let steppingFailed = false;
-  for (let stepIndex = 1; stepIndex <= NEWTON_SOURCE_STEPS; stepIndex += 1) {
-    const scale = stepIndex / NEWTON_SOURCE_STEPS;
-    const scaledBaseVector = baseVector.map((value) => value * scale);
-    let steppedVector = runNewtonIterations(
-      vector,
-      baseMatrix,
-      scaledBaseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      scale
-    );
-
-    if (!steppedVector) {
-      const scaledLinearGuess = solveLinearSystem(baseMatrix, scaledBaseVector);
-      if (scaledLinearGuess) {
-        steppedVector = runNewtonIterations(
-          scaledLinearGuess,
-          baseMatrix,
-          scaledBaseVector,
-          diodes,
-          bjts,
-          opAmps,
-          nodeCount,
-          opAmpRowOffset,
-          rootByTerminal,
-          getNodeIdx,
-          scale
-        );
-      }
-    }
-
-    if (!steppedVector) {
-      steppingFailed = true;
-      break;
-    }
-
-    vector = steppedVector;
-  }
-
-  if (!steppingFailed) {
-    return vector;
-  }
-
-  const resumed = runNewtonIterations(
-    vector,
-    baseMatrix,
-    baseVector,
-    diodes,
-    bjts,
-    opAmps,
-    nodeCount,
-    opAmpRowOffset,
-    rootByTerminal,
-    getNodeIdx,
-    1
-  );
-  if (resumed) {
-    return resumed;
-  }
-
-  if (linearGuess) {
-    const retriedLinear = runNewtonIterations(
-      linearGuess.slice(),
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      1
-    );
-    if (retriedLinear) {
-      return retriedLinear;
-    }
-  }
-
-  if (maxAbsValue(vector) > 0) {
-    return runNewtonIterations(
-      Array(size).fill(0),
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      1
-    );
-  }
-
-  return null;
-}
-
-function runNewtonIterations(
-  initialVector,
-  baseMatrix,
-  baseVector,
-  diodes,
-  bjts,
-  opAmps,
-  nodeCount,
-  opAmpRowOffset,
-  rootByTerminal,
-  getNodeIdx,
-  nonlinearScale = 1
-) {
-  let vector = initialVector.slice();
-
-  for (let iteration = 0; iteration < NEWTON_MAX_ITERATIONS; iteration += 1) {
-    const { residual, jacobian } = evaluateNonlinearSystem(
-      vector,
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
-      opAmps,
-      nodeCount,
-      opAmpRowOffset,
-      rootByTerminal,
-      getNodeIdx,
-      nonlinearScale
-    );
-    const residualMetrics = evaluateResidualMetrics(residual, nodeCount);
-    const residualScore = residualMetricsToScore(residualMetrics);
-    if (isResidualConverged(residualMetrics)) {
-      return vector;
-    }
-
-    const step = solveLinearSystem(jacobian, residual.map((value) => -value));
-    if (!step) {
-      return null;
-    }
-
-    const stepNorm = maxAbsValue(step);
-    if (stepNorm <= NEWTON_STEP_TOLERANCE) {
-      return isResidualCloseEnough(residualMetrics) ? vector : null;
-    }
-
-    let damping = 1;
-    let nextVector = null;
-    let nextResidualNorm = Infinity;
-
-    for (let attempt = 0; attempt < NEWTON_BACKTRACK_STEPS; attempt += 1) {
-      const candidate = limitCandidateJunctionVoltages(
-        vector.map((value, index) => value + step[index] * damping),
-        vector,
-        diodes,
-        bjts,
-        rootByTerminal,
-        getNodeIdx
-      );
-      const candidateResidualNorm = evaluateResidualNorm(
-        candidate,
-        baseMatrix,
-        baseVector,
-        diodes,
-        bjts,
-        opAmps,
-        nodeCount,
-        opAmpRowOffset,
-        rootByTerminal,
-        getNodeIdx,
-        nonlinearScale
-      );
-
-      if (candidateResidualNorm < residualScore) {
-        nextVector = candidate;
-        nextResidualNorm = candidateResidualNorm;
-        break;
-      }
-
-      if (candidateResidualNorm < nextResidualNorm) {
-        nextVector = candidate;
-        nextResidualNorm = candidateResidualNorm;
-      }
-
-      damping *= 0.5;
-    }
-
-    if (!nextVector || nextResidualNorm === Infinity) {
-      return null;
-    }
-
-    vector = nextVector;
-
-    if (nextResidualNorm <= 1 && stepNorm * damping <= NEWTON_STEP_TOLERANCE) {
-      return vector;
-    }
-  }
-
-  return null;
-}
-
-function evaluateNonlinearSystem(
-  vector,
-  baseMatrix,
-  baseVector,
-  diodes,
-  bjts,
-  opAmps,
-  nodeCount,
-  opAmpRowOffset,
-  rootByTerminal,
-  getNodeIdx,
-  nonlinearScale = 1
-) {
-  const deviceScale = clamp(nonlinearScale, 0, 1);
-  const residual = multiplyMatrixVector(baseMatrix, vector).map(
-    (value, index) => value - baseVector[index]
-  );
-  const jacobian = baseMatrix.map((row) => row.slice());
-
-  for (const component of diodes) {
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
-    const v0 = n0 >= 0 ? vector[n0] : 0;
-    const v1 = n1 >= 0 ? vector[n1] : 0;
-    const { current, conductance } = evaluateDiodeModel(component, v0 - v1);
-    const scaledCurrent = current * deviceScale;
-    const scaledConductance = conductance * deviceScale;
-
-    if (n0 >= 0) {
-      residual[n0] += scaledCurrent;
-      jacobian[n0][n0] += scaledConductance;
-    }
-
-    if (n1 >= 0) {
-      residual[n1] -= scaledCurrent;
-      jacobian[n1][n1] += scaledConductance;
-    }
-
-    if (n0 >= 0 && n1 >= 0) {
-      jacobian[n0][n1] -= scaledConductance;
-      jacobian[n1][n0] -= scaledConductance;
-    }
-  }
-
-  for (const component of bjts) {
-    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-    const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-    const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
-    const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
-    const nBase = getNodeIdx(rBase);
-    const nCollector = getNodeIdx(rCollector);
-    const nEmitter = getNodeIdx(rEmitter);
-    const vBase = nBase >= 0 ? vector[nBase] : 0;
-    const vCollector = nCollector >= 0 ? vector[nCollector] : 0;
-    const vEmitter = nEmitter >= 0 ? vector[nEmitter] : 0;
-    const model = evaluateBjtModel(component, vBase - vEmitter, vBase - vCollector);
-
-    stampBjtResidualAndJacobian(
-      residual,
-      jacobian,
-      nBase,
-      nCollector,
-      nEmitter,
-      model,
-      deviceScale
-    );
-  }
-
-  opAmps.forEach((component, index) => {
-    const row = opAmpRowOffset + index;
-    const { plusIndex, minusIndex } = getOpAmpInputTerminalIndices(component);
-    const rPlus = rootByTerminal.get(terminalKey(component.id, plusIndex));
-    const rMinus = rootByTerminal.get(terminalKey(component.id, minusIndex));
-    const nPlus = getNodeIdx(rPlus);
-    const nMinus = getNodeIdx(rMinus);
-    const vPlus = nPlus >= 0 ? vector[nPlus] : 0;
-    const vMinus = nMinus >= 0 ? vector[nMinus] : 0;
-    const { voltage, gain } = evaluateOpAmpModel(component, vPlus - vMinus);
-
-    residual[row] -= voltage;
-
-    if (nPlus >= 0) {
-      jacobian[row][nPlus] -= gain;
-    }
-
-    if (nMinus >= 0) {
-      jacobian[row][nMinus] += gain;
-    }
-  });
-
-  return { residual, jacobian };
-}
-
-function evaluateResidualNorm(
-  vector,
-  baseMatrix,
-  baseVector,
-  diodes,
-  bjts,
-  opAmps,
-  nodeCount,
-  opAmpRowOffset,
-  rootByTerminal,
-  getNodeIdx,
-  nonlinearScale = 1
-) {
-  const { residual } = evaluateNonlinearSystem(
-    vector,
-    baseMatrix,
-    baseVector,
-    diodes,
-    bjts,
-    opAmps,
-    nodeCount,
-    opAmpRowOffset,
-    rootByTerminal,
-    getNodeIdx,
-    nonlinearScale
-  );
-  return residualMetricsToScore(evaluateResidualMetrics(residual, nodeCount));
-}
-
-function evaluateResidualMetrics(residual, nodeCount) {
-  let maxKclResidual = 0;
-  let maxConstraintResidual = 0;
-
-  for (let index = 0; index < residual.length; index += 1) {
-    const absResidual = Math.abs(residual[index]);
-    if (index < nodeCount) {
-      maxKclResidual = Math.max(maxKclResidual, absResidual);
-    } else {
-      maxConstraintResidual = Math.max(maxConstraintResidual, absResidual);
-    }
-  }
-
-  return { maxKclResidual, maxConstraintResidual };
-}
-
-function residualMetricsToScore(metrics) {
-  const nodeScore = metrics.maxKclResidual / NEWTON_KCL_RESIDUAL_TOLERANCE;
-  const constraintScore =
-    metrics.maxConstraintResidual / NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE;
-  return Math.max(nodeScore, constraintScore);
-}
-
-function isResidualConverged(metrics) {
-  return (
-    metrics.maxKclResidual <= NEWTON_KCL_RESIDUAL_TOLERANCE &&
-    metrics.maxConstraintResidual <= NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE
-  );
-}
-
-function isResidualCloseEnough(metrics) {
-  return (
-    metrics.maxKclResidual <= NEWTON_KCL_RESIDUAL_TOLERANCE * 10 &&
-    metrics.maxConstraintResidual <= NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE * 10
-  );
-}
-
-function stampConductance(matrix, n0, n1, conductance) {
-  if (n0 >= 0) matrix[n0][n0] += conductance;
-  if (n1 >= 0) matrix[n1][n1] += conductance;
-  if (n0 >= 0 && n1 >= 0) {
-    matrix[n0][n1] -= conductance;
-    matrix[n1][n0] -= conductance;
-  }
-}
-
-function limitCandidateJunctionVoltages(candidate, previousVector, diodes, bjts, rootByTerminal, getNodeIdx) {
-  if (!diodes.length && !bjts.length) return candidate;
-
-  const limited = candidate.slice();
-
-  for (const component of diodes) {
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
-    const n0 = getNodeIdx(r0);
-    const n1 = getNodeIdx(r1);
-    limitBranchVoltageStep(limited, previousVector, n0, n1, MAX_DIODE_VOLTAGE_STEP);
-  }
-
-  for (const component of bjts) {
-    const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-    const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
-    const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));
-    const rEmitter = rootByTerminal.get(terminalKey(component.id, emitterIndex));
-    const nBase = getNodeIdx(rBase);
-    const nCollector = getNodeIdx(rCollector);
-    const nEmitter = getNodeIdx(rEmitter);
-
-    limitBranchVoltageStep(limited, previousVector, nBase, nEmitter, MAX_BJT_JUNCTION_VOLTAGE_STEP);
-    limitBranchVoltageStep(limited, previousVector, nBase, nCollector, MAX_BJT_JUNCTION_VOLTAGE_STEP);
-  }
-
-  return limited;
-}
-
-function getBranchVoltage(vector, n0, n1) {
-  const v0 = n0 >= 0 ? vector[n0] : 0;
-  const v1 = n1 >= 0 ? vector[n1] : 0;
-  return v0 - v1;
-}
-
-function limitBranchVoltageStep(candidate, previousVector, n0, n1, maxVoltageStep = MAX_DIODE_VOLTAGE_STEP) {
-  const previousDrop = getBranchVoltage(previousVector, n0, n1);
-  const nextDrop = getBranchVoltage(candidate, n0, n1);
-  const maxDrop = previousDrop + maxVoltageStep;
-  const minDrop = previousDrop - maxVoltageStep;
-  const boundedDrop = clamp(nextDrop, minDrop, maxDrop);
-  const correction = boundedDrop - nextDrop;
-
-  if (Math.abs(correction) < 1e-12) return;
-
-  if (n0 >= 0 && n1 >= 0) {
-    candidate[n0] += correction * 0.5;
-    candidate[n1] -= correction * 0.5;
-  } else if (n0 >= 0) {
-    candidate[n0] += correction;
-  } else if (n1 >= 0) {
-    candidate[n1] -= correction;
-  }
-}
-
-function stampBjtResidualAndJacobian(
-  residual,
-  jacobian,
-  nBase,
-  nCollector,
-  nEmitter,
-  model,
-  scale = 1
-) {
-  const nodeIndices = [nBase, nCollector, nEmitter];
-  const terminalCurrents = [model.ib * scale, model.ic * scale, model.ie * scale];
-  const derivatives = [
-    [model.dIb_dVb * scale, model.dIb_dVc * scale, model.dIb_dVe * scale],
-    [model.dIc_dVb * scale, model.dIc_dVc * scale, model.dIc_dVe * scale],
-    [model.dIe_dVb * scale, model.dIe_dVc * scale, model.dIe_dVe * scale],
-  ];
-
-  for (let row = 0; row < nodeIndices.length; row += 1) {
-    const rowIndex = nodeIndices[row];
-    if (rowIndex < 0) continue;
-
-    residual[rowIndex] += terminalCurrents[row];
-
-    for (let col = 0; col < nodeIndices.length; col += 1) {
-      const colIndex = nodeIndices[col];
-      if (colIndex < 0) continue;
-      jacobian[rowIndex][colIndex] += derivatives[row][col];
-    }
-  }
-}
-
-function solveLinearSystem(matrix, vector) {
-  const n = matrix.length;
-  const A = matrix.map((row, i) => [...row, vector[i]]);
-
-  for (let col = 0; col < n; col += 1) {
-    let pivotRow = col;
-    let best = Math.abs(A[col][col]);
-
-    for (let row = col + 1; row < n; row += 1) {
-      const val = Math.abs(A[row][col]);
-      if (val > best) {
-        best = val;
-        pivotRow = row;
-      }
-    }
-
-    if (best < 1e-11) {
-      return null;
-    }
-
-    if (pivotRow !== col) {
-      const tmp = A[col];
-      A[col] = A[pivotRow];
-      A[pivotRow] = tmp;
-    }
-
-    const pivot = A[col][col];
-    for (let j = col; j <= n; j += 1) {
-      A[col][j] /= pivot;
-    }
-
-    for (let row = col + 1; row < n; row += 1) {
-      const factor = A[row][col];
-      if (Math.abs(factor) < 1e-14) continue;
-
-      for (let j = col; j <= n; j += 1) {
-        A[row][j] -= factor * A[col][j];
-      }
-    }
-  }
-
-  const x = Array(n).fill(0);
-  for (let row = n - 1; row >= 0; row -= 1) {
-    let sum = A[row][n];
-    for (let col = row + 1; col < n; col += 1) {
-      sum -= A[row][col] * x[col];
-    }
-    x[row] = sum;
-  }
-
-  return x;
-}
-
 function onCircuitChanged() {
   if (state.simulationActive) {
     const result = runSimulation();
@@ -5098,15 +3701,21 @@ function buildResistorSvg() {
   </svg>`;
 }
 
-function buildVoltageSourceSvg() {
+function buildVoltageSourceSvg(options = {}) {
+  const showPolarityMarkers = options.showPolarityMarkers !== false;
+  const polarityMarkup = showPolarityMarkers
+    ? `
+      <line x1="58" y1="40" x2="74" y2="40"/>
+      <line x1="94" y1="32" x2="94" y2="48"/>
+      <line x1="86" y1="40" x2="102" y2="40"/>`
+    : "";
+
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
     <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="40" x2="42" y2="40"/>
       <line x1="118" y1="40" x2="160" y2="40"/>
       <circle cx="80" cy="40" r="37"/>
-      <line x1="58" y1="40" x2="74" y2="40"/>
-      <line x1="94" y1="32" x2="94" y2="48"/>
-      <line x1="86" y1="40" x2="102" y2="40"/>
+      ${polarityMarkup}
     </g>
   </svg>`;
 }
@@ -5136,7 +3745,7 @@ function buildOpAmpSvg(options = {}) {
       <line x1="0" y1="40" x2="34" y2="40"/>
       <line x1="0" y1="120" x2="34" y2="120"/>
       <line x1="166" y1="80" x2="200" y2="80"/>
-      <polygon points="34,16 34,144 166,80" fill="#e2e8f0"/>
+      <polygon points="34,16 34,144 166,80"/>
       ${topMarker}
       ${bottomMarker}
     </g>

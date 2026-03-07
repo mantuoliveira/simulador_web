@@ -1,0 +1,10 @@
+buildComponentStrip();
+setupCanvas();
+setupButtons();
+setupKeyboardShortcuts();
+setupCanvasGestures();
+setupWheelGestures();
+setupNativeZoomGuards();
+setupServiceWorker();
+setupRenderLoop();
+updateSelectionUi();
