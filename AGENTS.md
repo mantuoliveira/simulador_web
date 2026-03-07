@@ -4,7 +4,7 @@
 This repository is a static web app served directly from the project root. `index.html` defines the shell and controls, `styles.css` contains layout and visual styles, and `app.js` holds canvas interaction, wire routing, and the DC simulation logic. PWA files live beside the app entry points: `service-worker.js`, `manifest.webmanifest`, and `icon.svg`. `README.md` documents local usage and features. Keep related runtime files in the root unless a new folder adds a clear boundary.
 
 ## Build, Test, and Development Commands
-There is no bundler or compile step.
+There is no bundler, compile step, or dependency installation step for the app itself. The Python command below is only a convenient static file server.
 
 - `python3 -m http.server 8080` serves the app locally at `http://localhost:8080/index.html`.
 - `python3 -m http.server 8080 --bind 0.0.0.0` exposes the app on the local network for phone or tablet testing.

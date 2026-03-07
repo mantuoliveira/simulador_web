@@ -4,6 +4,8 @@ Simulador para navegador móvel com foco em circuitos DC, sem necessidade de ins
 
 ## Como executar
 
+Este projeto não tem dependências Python ou etapa de build. O comando abaixo serve apenas para publicar os arquivos estáticos localmente.
+
 1. No diretório do projeto, inicie um servidor HTTP local:
 
 ```bash
@@ -31,7 +33,7 @@ http://SEU_IP_LOCAL:8080/index.html
 
 ## Recursos implementados
 
-- Componentes: fonte de tensão, fonte de corrente, resistor, amplificador operacional, diodo e terra.
+- Componentes: fonte de tensão, fonte de corrente, resistor, amplificador operacional, diodo, transistor bipolar NPN e terra.
 - Ícones dos componentes em SVG.
 - Grade por pontos no canvas.
 - Roteamento ortogonal (90°) alinhado à grade para fios.
@@ -42,6 +44,7 @@ http://SEU_IP_LOCAL:8080/index.html
 - Tentativa de evitar travessia de fios por dentro de componentes.
 - Solver DC por Análise Nodal Modificada (MNA).
 - Diodo DC com modelo não linear tipo Shockley resolvido por Newton-Raphson.
+- Transistor bipolar NPN DC com `beta` ajustável e modelo não linear simplificado resolvido por Newton-Raphson.
 - Amplificador operacional DC com ganho de malha aberta fixo em `200000` e alimentação simétrica ajustável.
 - Exibição de tensão de nó e corrente nos componentes durante simulação.
 - PWA básico com `manifest` + `service worker` para suporte offline após primeiro carregamento.
