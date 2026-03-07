@@ -32,39 +32,50 @@
       </div>
 
       <footer id="bottom-bar">
-        <button id="clear-btn" class="ghost" type="button">Limpar</button>
+        <button
+          id="delete-btn"
+          class="secondary danger hidden"
+          type="button"
+          title="Excluir selecionado"
+          aria-label="Excluir selecionado"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 12H7L6 9z"
+            />
+          </svg>
+        </button>
         <div id="bottom-actions">
-          <button id="simulate-btn" class="primary" type="button">Simular</button>
+          <button
+            id="simulate-btn"
+            class="primary icon-only"
+            type="button"
+            title="Iniciar simulacao"
+            aria-label="Iniciar simulacao"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M8 5.5v13l10-6.5z" />
+            </svg>
+          </button>
+        </div>
+        <div id="right-actions">
           <button id="rotate-btn" class="secondary hidden" type="button" title="Rotacionar 90°">
             ↻
           </button>
           <button
-            id="delete-btn"
-            class="secondary danger hidden"
+            id="swap-op-amp-btn"
+            class="secondary hidden"
             type="button"
-            title="Excluir componente"
-            aria-label="Excluir componente"
+            title="Inverter terminais"
+            aria-label="Inverter terminais"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
-                d="M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM6 9h12l-1 12H7L6 9z"
+                d="M12 3l4 4h-3v10h3l-4 4-4-4h3V7H8l4-4z"
               />
             </svg>
           </button>
         </div>
-        <button
-          id="swap-op-amp-btn"
-          class="secondary hidden"
-          type="button"
-          title="Inverter terminais"
-          aria-label="Inverter terminais"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M12 3l4 4h-3v10h3l-4 4-4-4h3V7H8l4-4z"
-            />
-          </svg>
-        </button>
       </footer>
     </div>
 

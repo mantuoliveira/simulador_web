@@ -36,6 +36,12 @@ const TOUCH_TERMINAL_HIT_RADIUS = 0.78;
 const DOUBLE_TAP_MAX_DELAY_MS = 320;
 const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
 const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
+const DELETE_BUTTON_HOLD_MS = 2000;
+const SIMULATION_BUTTON_ICONS = {
+  idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10-6.5z"/></svg>',
+  running:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>',
+};
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -502,7 +508,6 @@ const appEls = {
   canvasWrap: document.getElementById("canvas-wrap"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
-  clearBtn: document.getElementById("clear-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
   deleteBtn: document.getElementById("delete-btn"),
   swapOpAmpBtn: document.getElementById("swap-op-amp-btn"),
@@ -535,6 +540,11 @@ const emptyCanvasTapState = {
   lastTimestamp: 0,
   lastScreenX: 0,
   lastScreenY: 0,
+};
+
+const deleteButtonHoldState = {
+  timerId: null,
+  suppressNextClick: false,
 };
 
 const spriteMap = loadSprites();
@@ -645,6 +655,8 @@ function resizeCanvas() {
 }
 
 function setupButtons() {
+  setSimulationButtonState(false);
+
   appEls.simulateBtn.addEventListener("click", () => {
     if (!state.simulationActive) {
       const autoGround = ensureGroundForSimulation();
@@ -659,20 +671,17 @@ function setupButtons() {
         return;
       }
       state.simulationActive = true;
-      appEls.simulateBtn.textContent = "Pausar";
-      appEls.simulateBtn.classList.add("running");
+      setSimulationButtonState(true);
       showStatus("Simulação DC ativa");
       return;
     }
 
     state.simulationActive = false;
     state.simulationResult = null;
-    appEls.simulateBtn.textContent = "Simular";
-    appEls.simulateBtn.classList.remove("running");
+    setSimulationButtonState(false);
     showStatus("Simulação pausada");
   });
 
-  appEls.clearBtn.addEventListener("click", clearCircuit);
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
@@ -685,7 +694,7 @@ function setupButtons() {
     onCircuitChanged();
   });
 
-  appEls.deleteBtn.addEventListener("click", handleDeleteAction);
+  setupDeleteButtonGestures();
 }
 
 function clearCircuit() {
@@ -700,11 +709,54 @@ function clearCircuit() {
   state.simulationActive = false;
   state.simulationResult = null;
 
-  appEls.simulateBtn.textContent = "Simular";
-  appEls.simulateBtn.classList.remove("running");
+  setSimulationButtonState(false);
   updateSelectionUi();
   requestRender(true);
   showStatus("Canvas limpo");
+}
+
+function setSimulationButtonState(isRunning) {
+  appEls.simulateBtn.innerHTML = isRunning ? SIMULATION_BUTTON_ICONS.running : SIMULATION_BUTTON_ICONS.idle;
+  appEls.simulateBtn.classList.toggle("running", isRunning);
+  appEls.simulateBtn.title = isRunning ? "Pausar simulacao" : "Iniciar simulacao";
+  appEls.simulateBtn.setAttribute("aria-label", isRunning ? "Pausar simulacao" : "Iniciar simulacao");
+  appEls.simulateBtn.setAttribute("aria-pressed", isRunning ? "true" : "false");
+}
+
+function setupDeleteButtonGestures() {
+  appEls.deleteBtn.addEventListener("click", (event) => {
+    if (deleteButtonHoldState.suppressNextClick) {
+      deleteButtonHoldState.suppressNextClick = false;
+      event.preventDefault();
+      return;
+    }
+
+    handleDeleteAction();
+  });
+
+  appEls.deleteBtn.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (state.selectedComponentId == null && state.selectedWireId == null) return;
+
+    clearDeleteButtonHold();
+    deleteButtonHoldState.suppressNextClick = false;
+    deleteButtonHoldState.timerId = setTimeout(() => {
+      deleteButtonHoldState.timerId = null;
+      deleteButtonHoldState.suppressNextClick = true;
+      clearCircuit();
+    }, DELETE_BUTTON_HOLD_MS);
+  });
+
+  appEls.deleteBtn.addEventListener("pointerup", clearDeleteButtonHold);
+  appEls.deleteBtn.addEventListener("pointerleave", clearDeleteButtonHold);
+  appEls.deleteBtn.addEventListener("pointercancel", clearDeleteButtonHold);
+}
+
+function clearDeleteButtonHold() {
+  if (deleteButtonHoldState.timerId == null) return;
+
+  clearTimeout(deleteButtonHoldState.timerId);
+  deleteButtonHoldState.timerId = null;
 }
 
 function toggleSelectedComponentTerminalOrder() {
@@ -3144,6 +3196,8 @@ function updateSelectionUi() {
   const wire = getWireById(state.selectedWireId);
 
   if (!component && !wire) {
+    clearDeleteButtonHold();
+    deleteButtonHoldState.suppressNextClick = false;
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
     appEls.swapOpAmpBtn.classList.add("hidden");
@@ -4398,8 +4452,7 @@ function onCircuitChanged() {
     if (!result.ok) {
       state.simulationActive = false;
       state.simulationResult = null;
-      appEls.simulateBtn.textContent = "Simular";
-      appEls.simulateBtn.classList.remove("running");
+      setSimulationButtonState(false);
       showStatus(result.message || "Erro na simulação", true);
     }
   }
