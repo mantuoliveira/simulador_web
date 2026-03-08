@@ -1,8 +1,14 @@
-const CACHE_NAME = "simulador-dc-v64";
+const CACHE_NAME = "simulador-dc-v65";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
+  "./app-core.js",
+  "./app-support.js",
+  "./app-render.js",
+  "./app-runtime.js",
+  "./app-controls.js",
+  "./app-interaction.js",
   "./app.js",
   "./app-routing.js",
   "./app-simulation.js",

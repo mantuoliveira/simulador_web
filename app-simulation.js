@@ -258,14 +258,16 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   return { ok: true, data };
 }
 
-function runSimulation() {
-  const result = simulateCircuit({
-    components: state.components,
-    wires: state.wires,
-    previousSolution: state.simulationResult?.data?.solutionVector,
-  });
+function buildStoredSimulationResult(result) {
+  return result.ok ? { ok: true, data: result.data } : null;
+}
 
-  state.simulationResult = result.ok ? { ok: true, data: result.data } : null;
+function runSimulation(circuit = state) {
+  const result = simulateCircuit({
+    components: circuit.components,
+    wires: circuit.wires,
+    previousSolution: circuit.simulationResult?.data?.solutionVector,
+  });
   return result;
 }
 

@@ -1,19 +1,18 @@
+const ORTHOGONAL_NEIGHBOR_STEPS = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+const COMPONENT_ROUTE_MARGIN = 2;
+const ROUTE_BOUNDS_PADDING = 10;
+
 function routeWireInCircuit(circuit, start, end, options = {}) {
-  const blocked = new Set();
+  const blocked = buildBlockedCellSetForComponents(circuit.components, start, end);
   const occupiedEdges = buildOccupiedWireEdgeSetForWires(circuit.wires, options.ignoreWireIds);
   const nodeProximity = buildTerminalProximitySetForComponents(circuit.components, start, end);
-
-  for (const component of circuit.components) {
-    const cells = getObstacleCells(component);
-    for (const cell of cells) {
-      blocked.add(key(cell.x, cell.y));
-    }
-  }
-
-  blocked.delete(key(start.x, start.y));
-  blocked.delete(key(end.x, end.y));
-
   const bounds = routeBoundsForComponents(circuit.components, start, end);
+
   return findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds, {
     preferredStartDirection: options.startDirection || null,
     preferredEndDirection: options.endDirection || null,
@@ -32,18 +31,17 @@ function routeBoundsForComponents(components, start, end) {
 
   for (const component of components) {
     const fp = getFootprintExtents(component);
-    minX = Math.min(minX, Math.floor(component.x - fp.left - 2));
-    maxX = Math.max(maxX, Math.ceil(component.x + fp.right + 2));
-    minY = Math.min(minY, Math.floor(component.y - fp.up - 2));
-    maxY = Math.max(maxY, Math.ceil(component.y + fp.down + 2));
+    minX = Math.min(minX, Math.floor(component.x - fp.left - COMPONENT_ROUTE_MARGIN));
+    maxX = Math.max(maxX, Math.ceil(component.x + fp.right + COMPONENT_ROUTE_MARGIN));
+    minY = Math.min(minY, Math.floor(component.y - fp.up - COMPONENT_ROUTE_MARGIN));
+    maxY = Math.max(maxY, Math.ceil(component.y + fp.down + COMPONENT_ROUTE_MARGIN));
   }
 
-  const pad = 10;
   return {
-    minX: minX - pad,
-    maxX: maxX + pad,
-    minY: minY - pad,
-    maxY: maxY + pad,
+    minX: minX - ROUTE_BOUNDS_PADDING,
+    maxX: maxX + ROUTE_BOUNDS_PADDING,
+    minY: minY - ROUTE_BOUNDS_PADDING,
+    maxY: maxY + ROUTE_BOUNDS_PADDING,
   };
 }
 
@@ -63,16 +61,7 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
   const preferredEndDirection = preferences.preferredEndDirection || null;
 
   while (open.size > 0) {
-    let currentStateKey = null;
-    let best = Infinity;
-
-    for (const candidate of open) {
-      const val = fScore.get(candidate) ?? Infinity;
-      if (val < best) {
-        best = val;
-        currentStateKey = candidate;
-      }
-    }
+    const currentStateKey = findLowestScoreStateKey(open, fScore);
 
     if (!currentStateKey) break;
 
@@ -86,20 +75,8 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
 
     open.delete(currentStateKey);
 
-    const neighbors = [
-      { x: current.x + 1, y: current.y },
-      { x: current.x - 1, y: current.y },
-      { x: current.x, y: current.y + 1 },
-      { x: current.x, y: current.y - 1 },
-    ];
-
-    for (const next of neighbors) {
-      if (
-        next.x < bounds.minX ||
-        next.x > bounds.maxX ||
-        next.y < bounds.minY ||
-        next.y > bounds.maxY
-      ) {
+    for (const next of getOrthogonalNeighbors(current)) {
+      if (!isPointWithinRouteBounds(next, bounds)) {
         continue;
       }
 
@@ -107,30 +84,22 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
       if (blocked.has(nk) && nk !== endKey) continue;
 
       const nextDirection = stepDirection(current, next);
-      const edgePenalty = occupiedEdges.has(edgeKey(current, next)) ? OCCUPIED_WIRE_EDGE_PENALTY : 0;
-      const proximityPenalty =
-        nk !== startKey && nk !== endKey && nodeProximity.has(nk) ? NODE_PROXIMITY_PENALTY : 0;
-      const turnPenalty =
-        currentState.direction && currentState.direction !== nextDirection ? TURN_PENALTY : 0;
-      const startDirectionPenalty =
-        !currentState.direction &&
-        preferredStartDirection &&
-        nextDirection !== preferredStartDirection
-          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
-          : 0;
-      const endDirectionPenalty =
-        nk === endKey && preferredEndDirection && nextDirection !== preferredEndDirection
-          ? TERMINAL_DIRECTION_MISMATCH_PENALTY
-          : 0;
       const nextStateKey = pathStateKey(next, nextDirection);
       const tentative =
         (gScore.get(currentStateKey) ?? Infinity) +
-        1 +
-        edgePenalty +
-        proximityPenalty +
-        turnPenalty +
-        startDirectionPenalty +
-        endDirectionPenalty;
+        computePathTransitionCost({
+          current,
+          currentState,
+          next,
+          nextKey: nk,
+          nextDirection,
+          startKey,
+          endKey,
+          occupiedEdges,
+          nodeProximity,
+          preferredStartDirection,
+          preferredEndDirection,
+        });
       if (tentative < (gScore.get(nextStateKey) ?? Infinity)) {
         cameFrom.set(nextStateKey, currentStateKey);
         gScore.set(nextStateKey, tentative);
@@ -141,6 +110,91 @@ function findPathAStar(start, end, blocked, occupiedEdges, nodeProximity, bounds
   }
 
   return null;
+}
+
+function buildBlockedCellSetForComponents(components, start, end) {
+  const blocked = new Set();
+
+  for (const component of components) {
+    const cells = getObstacleCells(component);
+    for (const cell of cells) {
+      blocked.add(key(cell.x, cell.y));
+    }
+  }
+
+  blocked.delete(key(start.x, start.y));
+  blocked.delete(key(end.x, end.y));
+  return blocked;
+}
+
+function findLowestScoreStateKey(open, fScore) {
+  let bestKey = null;
+  let bestScore = Infinity;
+
+  for (const candidate of open) {
+    const score = fScore.get(candidate) ?? Infinity;
+    if (score < bestScore) {
+      bestScore = score;
+      bestKey = candidate;
+    }
+  }
+
+  return bestKey;
+}
+
+function getOrthogonalNeighbors(point) {
+  return ORTHOGONAL_NEIGHBOR_STEPS.map((step) => ({
+    x: point.x + step.x,
+    y: point.y + step.y,
+  }));
+}
+
+function isPointWithinRouteBounds(point, bounds) {
+  return (
+    point.x >= bounds.minX &&
+    point.x <= bounds.maxX &&
+    point.y >= bounds.minY &&
+    point.y <= bounds.maxY
+  );
+}
+
+function computePathTransitionCost({
+  current,
+  currentState,
+  next,
+  nextKey,
+  nextDirection,
+  startKey,
+  endKey,
+  occupiedEdges,
+  nodeProximity,
+  preferredStartDirection,
+  preferredEndDirection,
+}) {
+  const edgePenalty = occupiedEdges.has(edgeKey(current, next)) ? OCCUPIED_WIRE_EDGE_PENALTY : 0;
+  const proximityPenalty =
+    nextKey !== startKey && nextKey !== endKey && nodeProximity.has(nextKey) ? NODE_PROXIMITY_PENALTY : 0;
+  const turnPenalty =
+    currentState.direction && currentState.direction !== nextDirection ? TURN_PENALTY : 0;
+  const startDirectionPenalty =
+    !currentState.direction &&
+    preferredStartDirection &&
+    nextDirection !== preferredStartDirection
+      ? TERMINAL_DIRECTION_MISMATCH_PENALTY
+      : 0;
+  const endDirectionPenalty =
+    nextKey === endKey && preferredEndDirection && nextDirection !== preferredEndDirection
+      ? TERMINAL_DIRECTION_MISMATCH_PENALTY
+      : 0;
+
+  return (
+    1 +
+    edgePenalty +
+    proximityPenalty +
+    turnPenalty +
+    startDirectionPenalty +
+    endDirectionPenalty
+  );
 }
 
 function buildOccupiedWireEdgeSetForWires(wires, ignoreWireIds = new Set()) {
@@ -155,23 +209,32 @@ function buildOccupiedWireEdgeSetForWires(wires, ignoreWireIds = new Set()) {
       const end = wire.path[i + 1];
 
       if (start.x === end.x) {
-        const step = start.y < end.y ? 1 : -1;
-        for (let y = start.y; y !== end.y; y += step) {
-          occupied.add(edgeKey({ x: start.x, y }, { x: start.x, y: y + step }));
-        }
+        addLinearOccupiedEdges(occupied, start, end, "y");
         continue;
       }
 
       if (start.y === end.y) {
-        const step = start.x < end.x ? 1 : -1;
-        for (let x = start.x; x !== end.x; x += step) {
-          occupied.add(edgeKey({ x, y: start.y }, { x: x + step, y: start.y }));
-        }
+        addLinearOccupiedEdges(occupied, start, end, "x");
       }
     }
   }
 
   return occupied;
+}
+
+function addLinearOccupiedEdges(occupied, start, end, axis) {
+  const delta = end[axis] > start[axis] ? 1 : -1;
+
+  if (axis === "y") {
+    for (let y = start.y; y !== end.y; y += delta) {
+      occupied.add(edgeKey({ x: start.x, y }, { x: start.x, y: y + delta }));
+    }
+    return;
+  }
+
+  for (let x = start.x; x !== end.x; x += delta) {
+    occupied.add(edgeKey({ x, y: start.y }, { x: x + delta, y: start.y }));
+  }
 }
 
 function buildOccupiedWireEdgeSet(ignoreWireIds = new Set()) {
@@ -193,14 +256,7 @@ function buildTerminalProximitySetForComponents(components, start, end) {
       const terminalKeyValue = key(terminal.x, terminal.y);
       if (protectedKeys.has(terminalKeyValue)) continue;
 
-      const neighbors = [
-        { x: terminal.x + 1, y: terminal.y },
-        { x: terminal.x - 1, y: terminal.y },
-        { x: terminal.x, y: terminal.y + 1 },
-        { x: terminal.x, y: terminal.y - 1 },
-      ];
-
-      for (const neighbor of neighbors) {
+      for (const neighbor of getOrthogonalNeighbors(terminal)) {
         const neighborKey = key(neighbor.x, neighbor.y);
         if (!protectedKeys.has(neighborKey)) {
           proximity.add(neighborKey);
