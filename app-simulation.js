@@ -1,3 +1,5 @@
+const IMPLICIT_GROUND_ROOT = "__implicit_ground__";
+
 function simulateCircuit({ components, wires, previousSolution = null }) {
   if (components.length === 0) {
     return { ok: false, message: "Adicione componentes antes de simular" };
@@ -24,16 +26,22 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const groundTerminals = components
     .filter((component) => component.type === "ground")
     .map((component) => terminalKey(component.id, 0));
+  const hasImplicitGroundReference = components.some((component) =>
+    isGroundReferencedVoltageSourceComponent(component)
+  );
 
-  if (groundTerminals.length === 0) {
+  if (groundTerminals.length === 0 && !hasImplicitGroundReference) {
     return { ok: false, message: "Inclua pelo menos um terra" };
   }
 
-  for (let i = 1; i < groundTerminals.length; i += 1) {
-    dsu.union(groundTerminals[0], groundTerminals[i]);
+  if (groundTerminals.length > 0) {
+    for (let i = 1; i < groundTerminals.length; i += 1) {
+      dsu.union(groundTerminals[0], groundTerminals[i]);
+    }
   }
 
-  const groundRoot = dsu.find(groundTerminals[0]);
+  const groundRoot =
+    groundTerminals.length > 0 ? dsu.find(groundTerminals[0]) : IMPLICIT_GROUND_ROOT;
 
   const rootByTerminal = new Map();
   for (const t of terminals) {
@@ -54,6 +62,13 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       const n1 = rootByTerminal.get(terminalKey(component.id, toIndex));
       if (!n0 || !n1) continue;
       addEdge(n0, n1);
+    }
+
+    if (isGroundReferencedVoltageSourceComponent(component)) {
+      const nodeRoot = rootByTerminal.get(terminalKey(component.id, 0));
+      if (nodeRoot) {
+        addEdge(nodeRoot, groundRoot);
+      }
     }
   }
 
@@ -94,7 +109,9 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const nonGroundRoots = [...activeRoots].filter((root) => root !== groundRoot);
   const nodeIndex = new Map(nonGroundRoots.map((root, idx) => [root, idx]));
 
-  const voltageSources = activeComponents.filter((component) => component.type === "voltage_source");
+  const voltageSources = activeComponents.filter((component) =>
+    isIdealVoltageSourceComponent(component)
+  );
   const diodes = activeComponents.filter((component) => component.type === "diode");
   const bjts = activeComponents.filter((component) => component.type === "bjt_npn");
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
@@ -413,8 +430,12 @@ function buildLinearMnaSystem(activeComponents, voltageSources, opAmps, rootByTe
 
   voltageSources.forEach((component, index) => {
     const row = nodeCount + index;
-    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
-    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const r0 = isGroundReferencedVoltageSourceComponent(component)
+      ? null
+      : rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = isGroundReferencedVoltageSourceComponent(component)
+      ? rootByTerminal.get(terminalKey(component.id, 0))
+      : rootByTerminal.get(terminalKey(component.id, 1));
     const n0 = getNodeIdx(r0);
     const n1 = getNodeIdx(r1);
 

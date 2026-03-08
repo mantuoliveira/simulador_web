@@ -52,6 +52,7 @@ const CURRENT_ARROW_BUTTON_ICONS = {
 };
 const LIGHT_THEME = "light";
 const DARK_THEME = "dark";
+const VOLTAGE_NODE_TYPE = "voltage_node";
 const THEME_PALETTE_DEFAULTS = {
   themeColor: "#edf4fb",
   statusBg: "rgba(15, 23, 42, 0.88)",
@@ -104,6 +105,28 @@ const COMPONENT_DEFS = {
       [1, 1],
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
+  },
+  [VOLTAGE_NODE_TYPE]: {
+    label: "No V",
+    terminals: [[0, -1]],
+    bodyHalfW: 1.1,
+    bodyHalfH: 1.1,
+    bodyOffsetY: 0.28,
+    renderW: 2,
+    renderH: 2,
+    defaultRotation: 180,
+    defaultValue: 10,
+    editable: true,
+    unit: "V",
+    obstacleCells: [
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 1.5, y: 1.5 },
   },
   current_source: {
     label: "Fonte I",
@@ -292,7 +315,16 @@ const COMPONENT_DEFS = {
   },
 };
 
-const COMPONENT_ORDER = ["voltage_source", "current_source", "resistor", "op_amp", "diode", "bjt_npn", "ground"];
+const COMPONENT_ORDER = [
+  "voltage_source",
+  "current_source",
+  "resistor",
+  "op_amp",
+  "diode",
+  "bjt_npn",
+  "ground",
+  VOLTAGE_NODE_TYPE,
+];
 
 const DEFAULT_COMPONENT_BEHAVIOR = {
   createState: () => ({}),
@@ -304,6 +336,7 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
   isSimulatedBranch: false,
   getReachabilityTerminalPairs: () => [],
   allowsIntraComponentConnection: () => false,
+  supportsCurrentArrow: false,
   getCurrentArrowTerminalPair: () => [0, 1],
   getCurrentArrowLayout: () => ({
     sideSign: 1,
@@ -324,6 +357,7 @@ const COMPONENT_BEHAVIORS = {
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
     drawSpriteOverlay: (component, renderTarget) =>
       drawVoltageSourcePolarityMarkers(renderTarget, component),
@@ -339,6 +373,16 @@ const COMPONENT_BEHAVIORS = {
       textOffsetExtra: 0,
     }),
   },
+  [VOLTAGE_NODE_TYPE]: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildVoltageNodeSvg(options),
+    formatValue: (component) => formatVoltage(component.value),
+    valueFromNormalized: (normalized) => roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
+    normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
+    getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 1.22),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [],
+  },
   current_source: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildCurrentSourceSvg(options),
@@ -347,6 +391,7 @@ const COMPONENT_BEHAVIORS = {
     normalizedFromValue: (component) => clamp((component.value + 0.1) / 0.2, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.05),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
     getCurrentArrowLayout: (_component, geometry) => ({
       sideSign: 1,
@@ -370,6 +415,7 @@ const COMPONENT_BEHAVIORS = {
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
     getCurrentArrowLayout: (component, geometry) => ({
       sideSign: getPointProjectionSideSign(
@@ -423,6 +469,7 @@ const COMPONENT_BEHAVIORS = {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildDiodeSvg(options),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
     getCurrentArrowLayout: () => ({
       sideSign: 1,
@@ -446,6 +493,7 @@ const COMPONENT_BEHAVIORS = {
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: (component) => {
       const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
       return [
@@ -506,6 +554,38 @@ function getComponentBehavior(type) {
   return COMPONENT_DEFS[type]?.behavior || DEFAULT_COMPONENT_BEHAVIOR;
 }
 
+function getDefaultComponentRotation(type, circuit = state) {
+  const preferredRotation =
+    circuit?.preferredComponentRotations instanceof Map
+      ? circuit.preferredComponentRotations.get(type)
+      : null;
+  if (preferredRotation != null) {
+    return normalizeRotation(preferredRotation);
+  }
+
+  return normalizeRotation(COMPONENT_DEFS[type]?.defaultRotation || 0);
+}
+
+function rememberComponentRotation(component, circuit = state) {
+  if (!component || !(circuit?.preferredComponentRotations instanceof Map)) {
+    return;
+  }
+
+  circuit.preferredComponentRotations.set(component.type, normalizeRotation(component.rotation || 0));
+}
+
+function isIdealVoltageSourceComponent(componentOrType) {
+  const type =
+    typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
+  return type === "voltage_source" || type === VOLTAGE_NODE_TYPE;
+}
+
+function isGroundReferencedVoltageSourceComponent(componentOrType) {
+  const type =
+    typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
+  return type === VOLTAGE_NODE_TYPE;
+}
+
 function getInitialCameraZoom() {
   if (window.matchMedia?.("(pointer: coarse)").matches) {
     return MOBILE_INITIAL_ZOOM;
@@ -530,7 +610,8 @@ const state = {
   simulationActive: false,
   simulationResult: null,
   hiddenNodeMarkerRoots: new Set(),
-  groundNodeLabelsInitialized: false,
+  defaultHiddenNodeMarkerRoots: new Set(),
+  preferredComponentRotations: new Map(),
   camera: {
     offsetX: 0,
     offsetY: 0,
@@ -855,6 +936,9 @@ function buildComponentStrip() {
     img.alt = "";
     img.setAttribute("aria-hidden", "true");
     img.src = svgToDataUri(buildSvgForType(type));
+    if (type === VOLTAGE_NODE_TYPE) {
+      img.style.transform = "rotate(180deg)";
+    }
 
     button.append(img);
     button.addEventListener("click", () => addComponent(type));
@@ -964,7 +1048,7 @@ function setupButtons() {
     state.simulationActive = false;
     state.simulationResult = null;
     state.hiddenNodeMarkerRoots.clear();
-    state.groundNodeLabelsInitialized = false;
+    state.defaultHiddenNodeMarkerRoots.clear();
     state.selectedNodeMarkerRoot = null;
     state.selectedNodeMarkerTerminal = null;
     setSimulationButtonState(false);
@@ -1025,7 +1109,7 @@ function clearCircuit() {
   state.simulationActive = false;
   state.simulationResult = null;
   state.hiddenNodeMarkerRoots.clear();
-  state.groundNodeLabelsInitialized = false;
+  state.defaultHiddenNodeMarkerRoots.clear();
 
   setSimulationButtonState(false);
   closeTerminalLabelEditor();
@@ -1043,7 +1127,7 @@ function setSimulationButtonState(isRunning) {
 }
 
 function canToggleCurrentArrow(component) {
-  return !!component && isSimulatedBranchComponent(component.type) && component.type !== "ground";
+  return !!component && getComponentBehavior(component.type).supportsCurrentArrow === true;
 }
 
 function canToggleComponentValueLabel(component) {
@@ -1208,6 +1292,10 @@ function toggleSelectedComponentTerminalOrder() {
 
 function ensureGroundForSimulation() {
   if (state.components.length === 0) {
+    return { ok: true };
+  }
+
+  if (state.components.some((component) => isGroundReferencedVoltageSourceComponent(component))) {
     return { ok: true };
   }
 
@@ -3056,7 +3144,7 @@ function addComponentToCircuit(circuit, type, position) {
     type,
     x: position.x,
     y: position.y,
-    rotation: 0,
+    rotation: getDefaultComponentRotation(type, circuit),
     value: def.defaultValue,
     ...behavior.createState(),
   };
@@ -3195,7 +3283,8 @@ function findEmptySpot(type) {
   const center = screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
   const visible = getVisibleWorldBounds();
   const margin = 1;
-  const footprint = getFootprintExtents({ type, rotation: 0 });
+  const preferredRotation = getDefaultComponentRotation(type);
+  const footprint = getFootprintExtents({ type, rotation: preferredRotation });
 
   const minX = Math.ceil(visible.minX + footprint.left + margin);
   const maxX = Math.floor(visible.maxX - footprint.right - margin);
@@ -3207,7 +3296,7 @@ function findEmptySpot(type) {
   const baseX = clamp(Math.round(center.x), minX, maxX);
   const baseY = clamp(Math.round(center.y), minY, maxY);
 
-  const candidate = { id: -1, type, x: baseX, y: baseY, rotation: 0 };
+  const candidate = { id: -1, type, x: baseX, y: baseY, rotation: preferredRotation };
   const searchPaddingValues = [2, 0];
 
   // Prefer a bit of breathing room on auto-placement, but fall back to the
@@ -3330,8 +3419,9 @@ function moveComponentInCircuit(circuit, componentId, targetX, targetY) {
     component.x = previousPosition.x;
     component.y = previousPosition.y;
     circuit.nextWireId = previousNextWireId;
-    if (contactSyncResult.createdWireId != null) {
-      circuit.wires = circuit.wires.filter((wire) => wire.id !== contactSyncResult.createdWireId);
+    if (Array.isArray(contactSyncResult.createdWireIds) && contactSyncResult.createdWireIds.length > 0) {
+      const createdWireIds = new Set(contactSyncResult.createdWireIds);
+      circuit.wires = circuit.wires.filter((wire) => !createdWireIds.has(wire.id));
     }
     restoreWireStates(linkedWires, previousWireStates);
     return { ok: false };
@@ -3364,6 +3454,8 @@ function rotateComponentInCircuit(circuit, componentId, step = 90) {
     restoreWireStates(linkedWires, previousWireStates);
     return { ok: false, message: "Sem rota livre para os fios" };
   }
+
+  rememberComponentRotation(component, circuit);
 
   return {
     ok: true,
@@ -3431,50 +3523,59 @@ function findAutoContactCandidateInCircuit(circuit, movingComponentId) {
     (component) =>
       component.id !== movingComponentId && componentsOverlap(movingComponent, component, 0)
   );
-  if (overlappingComponents.length !== 1) {
+  if (overlappingComponents.length === 0) {
     return null;
   }
 
-  const targetComponent = overlappingComponents[0];
   const movingDef = COMPONENT_DEFS[movingComponent.type];
-  const targetDef = COMPONENT_DEFS[targetComponent.type];
-  let match = null;
+  const matches = [];
+  const matchKeys = new Set();
 
-  for (let movingTerminalIndex = 0; movingTerminalIndex < movingDef.terminals.length; movingTerminalIndex += 1) {
-    const movingTerminal = getTerminalPositionForComponents(
-      circuit.components,
-      movingComponentId,
-      movingTerminalIndex
-    );
-    if (!movingTerminal) continue;
+  for (const targetComponent of overlappingComponents) {
+    const targetDef = COMPONENT_DEFS[targetComponent.type];
+    let matchedTarget = false;
 
-    for (let targetTerminalIndex = 0; targetTerminalIndex < targetDef.terminals.length; targetTerminalIndex += 1) {
-      const targetTerminal = getTerminalPositionForComponents(
+    for (let movingTerminalIndex = 0; movingTerminalIndex < movingDef.terminals.length; movingTerminalIndex += 1) {
+      const movingTerminal = getTerminalPositionForComponents(
         circuit.components,
-        targetComponent.id,
-        targetTerminalIndex
+        movingComponentId,
+        movingTerminalIndex
       );
-      if (!targetTerminal || !sameGridPoint(movingTerminal, targetTerminal)) {
-        continue;
+      if (!movingTerminal) continue;
+
+      for (let targetTerminalIndex = 0; targetTerminalIndex < targetDef.terminals.length; targetTerminalIndex += 1) {
+        const targetTerminal = getTerminalPositionForComponents(
+          circuit.components,
+          targetComponent.id,
+          targetTerminalIndex
+        );
+        if (!targetTerminal || !sameGridPoint(movingTerminal, targetTerminal)) {
+          continue;
+        }
+
+        const fromRef = { componentId: movingComponentId, terminalIndex: movingTerminalIndex };
+        const toRef = { componentId: targetComponent.id, terminalIndex: targetTerminalIndex };
+        const matchKey = `${fromRef.componentId}:${fromRef.terminalIndex}|${toRef.componentId}:${toRef.terminalIndex}`;
+        if (matchKeys.has(matchKey)) {
+          continue;
+        }
+
+        matchKeys.add(matchKey);
+        matchedTarget = true;
+        matches.push({
+          fromRef,
+          toRef,
+          existingWire: findDirectWireBetweenInCircuit(circuit, fromRef, toRef),
+        });
       }
+    }
 
-      const fromRef = { componentId: movingComponentId, terminalIndex: movingTerminalIndex };
-      const toRef = { componentId: targetComponent.id, terminalIndex: targetTerminalIndex };
-      const existingWire = findDirectWireBetweenInCircuit(circuit, fromRef, toRef);
-
-      if (match) {
-        return null;
-      }
-
-      match = {
-        fromRef,
-        toRef,
-        existingWire,
-      };
+    if (!matchedTarget) {
+      return null;
     }
   }
 
-  return match;
+  return matches.length > 0 ? { matches } : null;
 }
 
 function findDirectWireBetweenInCircuit(circuit, firstRef, secondRef) {
@@ -3491,30 +3592,32 @@ function wireConnectsTerminalRefs(wire, firstRef, secondRef) {
 }
 
 function syncImplicitContactWiresInCircuit(circuit, componentId, autoContactCandidate = null) {
-  let activeWire = autoContactCandidate?.existingWire || null;
-  let createdWireId = null;
+  const activeWireIds = new Set();
+  const createdWireIds = [];
+  const matches = autoContactCandidate?.matches || [];
 
-  if (!activeWire && autoContactCandidate) {
-    activeWire = buildImplicitContactWireInCircuit(
-      circuit,
-      autoContactCandidate.fromRef,
-      autoContactCandidate.toRef
-    );
+  for (const match of matches) {
+    let activeWire = match.existingWire || null;
     if (!activeWire) {
-      return { ok: false };
+      activeWire = buildImplicitContactWireInCircuit(circuit, match.fromRef, match.toRef);
+      if (!activeWire) {
+        return { ok: false, createdWireIds };
+      }
+      circuit.wires.push(activeWire);
+      createdWireIds.push(activeWire.id);
     }
-    circuit.wires.push(activeWire);
-    createdWireId = activeWire.id;
+
+    activeWireIds.add(activeWire.id);
   }
 
   const linkedWires = getWiresForComponentFromCollection(circuit.wires, componentId);
   for (const wire of linkedWires) {
-    const isActiveWire = activeWire?.id === wire.id;
+    const isActiveWire = activeWireIds.has(wire.id);
     if (!wire.implicitContact && !isActiveWire) continue;
 
     const terminalPositions = getWireTerminalPositionsForComponents(circuit.components, wire);
     if (!terminalPositions) {
-      return { ok: false, createdWireId };
+      return { ok: false, createdWireIds };
     }
 
     const coincident = sameGridPoint(terminalPositions.start, terminalPositions.end);
@@ -3532,7 +3635,7 @@ function syncImplicitContactWiresInCircuit(circuit, componentId, autoContactCand
     }
   }
 
-  return { ok: true, createdWireId };
+  return { ok: true, createdWireIds };
 }
 
 function buildImplicitContactWireInCircuit(circuit, fromRef, toRef) {
@@ -4178,6 +4281,13 @@ function clearInvalidSelectionsInCircuit(circuit) {
       circuit.hiddenNodeMarkerRoots.delete(root);
       changed = true;
     }
+
+    if (circuit.defaultHiddenNodeMarkerRoots instanceof Set) {
+      for (const root of [...circuit.defaultHiddenNodeMarkerRoots]) {
+        if (validRoots.has(root)) continue;
+        circuit.defaultHiddenNodeMarkerRoots.delete(root);
+      }
+    }
   }
 
   if (!circuit.pendingTerminal) {
@@ -4241,20 +4351,25 @@ function getSelectedNodeMarker() {
 }
 
 function applyDefaultGroundNodeMarkerVisibility(simulationData = state.simulationResult?.data) {
-  if (!simulationData || state.groundNodeLabelsInitialized) {
+  if (!simulationData) {
     return;
   }
 
   for (const component of state.components) {
-    if (component.type !== "ground") continue;
+    if (component.type !== "ground" && !isGroundReferencedVoltageSourceComponent(component)) {
+      continue;
+    }
 
     const root = simulationData.rootByTerminal?.get(terminalKey(component.id, 0));
     if (root != null) {
+      if (state.defaultHiddenNodeMarkerRoots.has(root)) {
+        continue;
+      }
+
+      state.defaultHiddenNodeMarkerRoots.add(root);
       state.hiddenNodeMarkerRoots.add(root);
     }
   }
-
-  state.groundNodeLabelsInitialized = true;
 }
 
 function getNodeMarkerRootForTerminal(componentId, terminalIndex) {
@@ -4681,6 +4796,14 @@ function getCardinalValueLabelAnchor(component, offset) {
   return { x: component.x - offset, y: component.y };
 }
 
+function getReverseCardinalValueLabelAnchor(component, offset) {
+  const rotation = normalizeRotation(component.rotation);
+  if (rotation === 0) return { x: component.x, y: component.y + offset };
+  if (rotation === 90) return { x: component.x - offset, y: component.y };
+  if (rotation === 180) return { x: component.x, y: component.y - offset };
+  return { x: component.x + offset, y: component.y };
+}
+
 function getValueLabelAnchor(component) {
   return getComponentBehavior(component.type).getValueLabelAnchor(component);
 }
@@ -4693,7 +4816,7 @@ function onCircuitChanged() {
       state.simulationActive = false;
       state.simulationResult = null;
       state.hiddenNodeMarkerRoots.clear();
-      state.groundNodeLabelsInitialized = false;
+      state.defaultHiddenNodeMarkerRoots.clear();
       state.selectedNodeMarkerRoot = null;
       state.selectedNodeMarkerTerminal = null;
       setSimulationButtonState(false);
@@ -5181,6 +5304,16 @@ function buildCurrentSourceSvg(options = {}) {
       <line x1="58" y1="40" x2="102" y2="40"/>
       <polyline points="92,30 102,40 92,50"/>
     </g>
+  </svg>`;
+}
+
+function buildVoltageNodeSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="40" y1="0" x2="40" y2="35"/>
+    </g>
+    <circle cx="40" cy="44" r="9" fill="${stroke}" />
   </svg>`;
 }
 
