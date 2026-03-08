@@ -74,7 +74,7 @@ function evaluateBjtSaturationFactor(model, vce) {
   };
 }
 
-function evaluateBjtModel(component, vbe, vbc) {
+function evaluateBjtCoreModel(component, vbe, vbc) {
   const def = COMPONENT_DEFS[component?.type];
   const model = def?.model || {};
   const beta = safeBjtBeta(component?.value);
@@ -134,6 +134,29 @@ function evaluateBjtModel(component, vbe, vbc) {
     dIe_dVc: -(dIc_dVc + dIb_dVc),
     dIe_dVe: -(dIc_dVe + dIb_dVe),
   };
+}
+
+function evaluateBjtModel(component, vbe, vbc) {
+  const type = component?.type;
+  if (type === "bjt_pnp") {
+    const mirroredModel = evaluateBjtCoreModel(component, -vbe, -vbc);
+    return {
+      ib: -mirroredModel.ib,
+      ic: -mirroredModel.ic,
+      ie: -mirroredModel.ie,
+      dIb_dVb: mirroredModel.dIb_dVb,
+      dIb_dVc: mirroredModel.dIb_dVc,
+      dIb_dVe: mirroredModel.dIb_dVe,
+      dIc_dVb: mirroredModel.dIc_dVb,
+      dIc_dVc: mirroredModel.dIc_dVc,
+      dIc_dVe: mirroredModel.dIc_dVe,
+      dIe_dVb: mirroredModel.dIe_dVb,
+      dIe_dVc: mirroredModel.dIe_dVc,
+      dIe_dVe: mirroredModel.dIe_dVe,
+    };
+  }
+
+  return evaluateBjtCoreModel(component, vbe, vbc);
 }
 
 function evaluateOpAmpModel(component, differentialVoltage) {
@@ -381,8 +404,30 @@ function buildDiodeSvg(options = {}) {
   </svg>`;
 }
 
-function buildBjtNpnSvg(options = {}) {
+function buildBjtSvg(options = {}, emitterArrowDirection = "out") {
   const { stroke } = getSpriteThemeColors(options.palette);
+  const branchStart = { x: 50, y: 80 };
+  const branchEnd = { x: 80, y: 112 };
+  const branchDx = branchEnd.x - branchStart.x;
+  const branchDy = branchEnd.y - branchStart.y;
+  const branchLength = Math.hypot(branchDx, branchDy) || 1;
+  const dirX = branchDx / branchLength;
+  const dirY = branchDy / branchLength;
+  const normalX = -dirY;
+  const normalY = dirX;
+  const tipDistance = emitterArrowDirection === "in" ? 18 : 32;
+  const arrowLength = 14;
+  const arrowHalfWidth = 7;
+  const tipX = branchStart.x + dirX * tipDistance;
+  const tipY = branchStart.y + dirY * tipDistance;
+  const tailCenterX = tipX + dirX * (emitterArrowDirection === "in" ? arrowLength : -arrowLength);
+  const tailCenterY = tipY + dirY * (emitterArrowDirection === "in" ? arrowLength : -arrowLength);
+  const leftX = tailCenterX + normalX * arrowHalfWidth;
+  const leftY = tailCenterY + normalY * arrowHalfWidth;
+  const rightX = tailCenterX - normalX * arrowHalfWidth;
+  const rightY = tailCenterY - normalY * arrowHalfWidth;
+  const arrowMarkup = `
+      <polyline points="${leftX.toFixed(1)},${leftY.toFixed(1)} ${tipX.toFixed(1)},${tipY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
     <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="80" x2="50" y2="80"/>
@@ -391,10 +436,17 @@ function buildBjtNpnSvg(options = {}) {
       <line x1="80" y1="48" x2="80" y2="0"/>
       <line x1="50" y1="80" x2="80" y2="112"/>
       <line x1="80" y1="112" x2="80" y2="160"/>
-      <line x1="66" y1="112" x2="80" y2="112"/>
-      <line x1="80" y1="98" x2="80" y2="112"/>
+      ${arrowMarkup}
     </g>
   </svg>`;
+}
+
+function buildBjtNpnSvg(options = {}) {
+  return buildBjtSvg(options, "out");
+}
+
+function buildBjtPnpSvg(options = {}) {
+  return buildBjtSvg(options, "in");
 }
 
 function buildGroundSvg(options = {}) {

@@ -283,6 +283,44 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 2.5, y: 2.5 },
   },
+  bjt_pnp: {
+    label: "Trans PNP",
+    terminals: [
+      [-2, 0],
+      [0, -2],
+      [0, 2],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 1.55,
+    renderW: 4,
+    renderH: 4,
+    defaultValue: 100,
+    editable: true,
+    showValueLabel: false,
+    unit: "beta",
+    model: {
+      baseSaturationCurrent: 1e-14,
+      collectorSaturationCurrent: 1e-14,
+      idealityFactor: 1.2,
+      thermalVoltage: 0.02585,
+      gmin: 1e-9,
+      saturationVoltage: 0.15,
+      saturationSharpness: 0.04,
+      collectorEmitterConductance: 1e-9,
+    },
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 2.5, y: 2.5 },
+  },
   junction: {
     label: "Junção",
     terminals: [[0, 0]],
@@ -324,6 +362,7 @@ const COMPONENT_ORDER = [
   "op_amp",
   "diode",
   "bjt_npn",
+  "bjt_pnp",
   "ground",
   VOLTAGE_NODE_TYPE,
 ];
@@ -538,6 +577,65 @@ const COMPONENT_BEHAVIORS = {
       },
     },
   },
+  bjt_pnp: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({ collectorEmitterSwapped: false }),
+    buildSvg: (options = {}) => buildBjtPnpSvg(options),
+    formatValue: (component) => `β=${Math.round(component.value)}`,
+    valueFromNormalized: (normalized) =>
+      snapToStep(
+        BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
+        BJT_BETA_STEP
+      ),
+    normalizedFromValue: (component) => {
+      const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
+      return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [
+        [BJT_BASE_TERMINAL_INDEX, collectorIndex],
+        [BJT_BASE_TERMINAL_INDEX, emitterIndex],
+        [collectorIndex, emitterIndex],
+      ];
+    },
+    allowsIntraComponentConnection: (component, firstTerminalIndex, secondTerminalIndex) => {
+      const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+      return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
+    },
+    getCurrentArrowTerminalPair: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [collectorIndex, emitterIndex];
+    },
+    getCurrentArrowLayout: (component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        getTerminalPosition(component.id, BJT_BASE_TERMINAL_INDEX),
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.collectorEmitterSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar coletor e emissor",
+      ariaLabel: "Trocar coletor e emissor",
+      toggle(component) {
+        component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
+        return "Coletor e emissor trocados";
+      },
+    },
+  },
   ground: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildGroundSvg(options),
@@ -586,6 +684,12 @@ function isGroundReferencedVoltageSourceComponent(componentOrType) {
   const type =
     typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
   return type === VOLTAGE_NODE_TYPE;
+}
+
+function isBjtComponentType(componentOrType) {
+  const type =
+    typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
+  return type === "bjt_npn" || type === "bjt_pnp";
 }
 
 function getInitialCameraZoom() {

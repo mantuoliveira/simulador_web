@@ -17,6 +17,10 @@ function setupButtons() {
     openTerminalLabelEditor(terminalRef);
   });
 
+  appEls.groupSelectBtn.addEventListener("click", () => {
+    toggleGroupSelectionMode();
+  });
+
   appEls.simulateBtn.addEventListener("click", () => {
     if (!state.simulationActive) {
       const autoGround = ensureGroundForSimulation();

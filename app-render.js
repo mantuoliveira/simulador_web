@@ -219,7 +219,10 @@ function drawComponents(renderTarget, showSelection = true) {
 
     behavior.drawSpriteOverlay(component, renderTarget);
 
-    if (showSelection && state.selectedComponentId === component.id) {
+    const isSelected =
+      showSelection &&
+      (state.selectedComponentId === component.id || isComponentGroupSelected(component.id));
+    if (isSelected) {
       context.strokeStyle = palette.canvasSelection;
       context.lineWidth = 2;
       context.strokeRect(

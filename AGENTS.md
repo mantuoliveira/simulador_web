@@ -36,7 +36,7 @@ There is no bundler, compile step, or dependency installation step for the app i
 - `git diff -- index.html styles.css app-core.js app-support.js app-runtime.js app-controls.js app-render.js app-interaction.js app.js app-routing.js app-simulation.js app-export.js app-bootstrap.js service-worker.js` is the quickest review pass before committing UI or simulation changes.
 
 ## Coding Style & Naming Conventions
-Use 2-space indentation in HTML, CSS, and JavaScript. Follow the existing JavaScript style: `const`/`let`, semicolons, uppercase snake case for shared constants (`GRID_SIZE`, `MAX_ZOOM`), and snake case identifiers for component keys such as `voltage_source` and `bjt_npn`. Prefer small helper functions over repeated inline geometry or solver math. Keep user-facing labels and messages in Portuguese to match the current UI.
+Use 2-space indentation in HTML, CSS, and JavaScript. Follow the existing JavaScript style: `const`/`let`, semicolons, uppercase snake case for shared constants (`GRID_SIZE`, `MAX_ZOOM`), and snake case identifiers for component keys such as `voltage_source`, `bjt_npn`, and `bjt_pnp`. Prefer small helper functions over repeated inline geometry or solver math. Keep user-facing labels and messages in Portuguese to match the current UI.
 
 ## Testing Guidelines
 The repository currently has no automated test suite. Test changes manually in a browser after starting the local server: place components, connect wires, rotate or swap supported parts, run and pause the simulation, and reload once to verify offline caching still behaves correctly. If automated tests are added later, place them under `tests/` and use names ending in `.test.js`.

@@ -8,11 +8,13 @@ const state = {
   nextWireId: 1,
   nextSplitGroupId: 1,
   selectedComponentId: null,
+  selectedComponentIds: new Set(),
   selectedWireId: null,
   selectedTerminalLabelKey: null,
   selectedNodeMarkerRoot: null,
   selectedNodeMarkerTerminal: null,
   pendingTerminal: null,
+  groupSelectMode: false,
   simulationActive: false,
   simulationResult: null,
   hiddenNodeMarkerRoots: new Set(),
@@ -43,6 +45,12 @@ const state = {
   },
 };
 
+function clearGroupSelection(circuit = state) {
+  if (circuit.selectedComponentIds instanceof Set) {
+    circuit.selectedComponentIds.clear();
+  }
+}
+
 function clearNodeMarkerSelection(circuit = state) {
   circuit.selectedNodeMarkerRoot = null;
   circuit.selectedNodeMarkerTerminal = null;
@@ -56,6 +64,8 @@ function clearNonComponentSelection(circuit = state) {
 
 function clearSelectionState(circuit = state) {
   circuit.selectedComponentId = null;
+  circuit.groupSelectMode = false;
+  clearGroupSelection(circuit);
   clearNonComponentSelection(circuit);
   circuit.pendingTerminal = null;
 }
@@ -81,6 +91,7 @@ const appEls = {
   simulateBtn: document.getElementById("simulate-btn"),
   themeToggleBtn: document.getElementById("theme-toggle-btn"),
   editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
+  groupSelectBtn: document.getElementById("group-select-btn"),
   exportBtn: document.getElementById("export-btn"),
   currentArrowBtn: document.getElementById("current-arrow-btn"),
   rotateBtn: document.getElementById("rotate-btn"),

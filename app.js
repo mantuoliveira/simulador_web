@@ -442,6 +442,178 @@ function tryMoveComponent(componentId, targetX, targetY) {
   return result.ok;
 }
 
+function getWiresForComponentIdsFromCollection(wires, componentIds) {
+  const ids = componentIds instanceof Set ? componentIds : new Set(componentIds);
+  const seen = new Set();
+  const linked = [];
+
+  for (const wire of wires) {
+    if (!ids.has(wire.from.componentId) && !ids.has(wire.to.componentId)) {
+      continue;
+    }
+
+    if (seen.has(wire.id)) continue;
+    seen.add(wire.id);
+    linked.push(wire);
+  }
+
+  return linked;
+}
+
+function restoreComponentPositions(components, previousPositions) {
+  for (const component of components) {
+    const previous = previousPositions.get(component.id);
+    if (!previous) continue;
+    component.x = previous.x;
+    component.y = previous.y;
+  }
+}
+
+function rollbackGroupMoveInCircuit(
+  circuit,
+  movedComponents,
+  previousPositions,
+  linkedWires,
+  previousWireStates,
+  previousNextWireId,
+  createdWireIds
+) {
+  restoreComponentPositions(movedComponents, previousPositions);
+  circuit.nextWireId = previousNextWireId;
+  if (createdWireIds.length > 0) {
+    const createdIds = new Set(createdWireIds);
+    circuit.wires = circuit.wires.filter((wire) => !createdIds.has(wire.id));
+  }
+  restoreWireStates(linkedWires, previousWireStates);
+}
+
+function tryMoveSelectedComponents(anchorComponentId, targetX, targetY) {
+  const result = moveSelectedComponentsInCircuit(state, anchorComponentId, targetX, targetY);
+  if (result.ok) {
+    onCircuitChanged();
+    if (result.selectionChanged) {
+      updateSelectionUi();
+    }
+  }
+  return result.ok;
+}
+
+function moveSelectedComponentsInCircuit(circuit, anchorComponentId, targetX, targetY) {
+  const selectedIds = circuit.selectedComponentIds instanceof Set ? [...circuit.selectedComponentIds] : [];
+  if (selectedIds.length === 0) {
+    return { ok: false, message: "Nenhum componente selecionado" };
+  }
+
+  if (!selectedIds.includes(anchorComponentId)) {
+    return { ok: false, message: "Componente ancora nao selecionado" };
+  }
+
+  const selectedIdSet = new Set(selectedIds);
+  const movedComponents = selectedIds
+    .map((componentId) => getComponentByIdFromCollection(circuit.components, componentId))
+    .filter(Boolean);
+  if (movedComponents.length !== selectedIds.length) {
+    return { ok: false, message: "Selecao de grupo invalida" };
+  }
+
+  const anchorComponent = getComponentByIdFromCollection(circuit.components, anchorComponentId);
+  if (!anchorComponent) {
+    return { ok: false, message: "Componente ancora nao encontrado" };
+  }
+
+  const deltaX = targetX - anchorComponent.x;
+  const deltaY = targetY - anchorComponent.y;
+  if (deltaX === 0 && deltaY === 0) {
+    return { ok: true };
+  }
+
+  const previousPositions = new Map(
+    movedComponents.map((component) => [component.id, { x: component.x, y: component.y }])
+  );
+  const linkedWires = getWiresForComponentIdsFromCollection(circuit.wires, selectedIdSet);
+  const previousWireStates = snapshotWireStates(linkedWires);
+  const previousNextWireId = circuit.nextWireId;
+  const createdWireIds = [];
+  const stationaryComponents = circuit.components.filter((component) => !selectedIdSet.has(component.id));
+
+  for (const component of movedComponents) {
+    component.x += deltaX;
+    component.y += deltaY;
+  }
+
+  for (const component of movedComponents) {
+    const autoContactCandidate = findAutoContactCandidateForTargetsInCircuit(
+      circuit,
+      component.id,
+      stationaryComponents
+    );
+    const placementOk = isComponentPlacementValidForComponents(stationaryComponents, component, null, 0);
+    if (!placementOk && !autoContactCandidate) {
+      rollbackGroupMoveInCircuit(
+        circuit,
+        movedComponents,
+        previousPositions,
+        linkedWires,
+        previousWireStates,
+        previousNextWireId,
+        createdWireIds
+      );
+      return { ok: false };
+    }
+  }
+
+  for (const component of movedComponents) {
+    const autoContactCandidate = findAutoContactCandidateForTargetsInCircuit(
+      circuit,
+      component.id,
+      stationaryComponents
+    );
+    const contactSyncResult = syncImplicitContactWiresInCircuit(
+      circuit,
+      component.id,
+      autoContactCandidate
+    );
+    if (!contactSyncResult.ok) {
+      rollbackGroupMoveInCircuit(
+        circuit,
+        movedComponents,
+        previousPositions,
+        linkedWires,
+        previousWireStates,
+        previousNextWireId,
+        createdWireIds
+      );
+      return { ok: false };
+    }
+
+    if (Array.isArray(contactSyncResult.createdWireIds) && contactSyncResult.createdWireIds.length > 0) {
+      createdWireIds.push(...contactSyncResult.createdWireIds);
+    }
+  }
+
+  for (const component of movedComponents) {
+    if (rerouteConnectedWiresInCircuit(circuit, component.id)) {
+      continue;
+    }
+
+    rollbackGroupMoveInCircuit(
+      circuit,
+      movedComponents,
+      previousPositions,
+      linkedWires,
+      previousWireStates,
+      previousNextWireId,
+      createdWireIds
+    );
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    selectionChanged: clearInvalidSelectionsInCircuit(circuit),
+  };
+}
+
 function moveComponentInCircuit(circuit, componentId, targetX, targetY) {
   const component = getComponentByIdFromCollection(circuit.components, componentId);
   if (!component) {
@@ -575,13 +747,12 @@ function componentsOverlap(a, b, padding = 0) {
   );
 }
 
-function findAutoContactCandidateInCircuit(circuit, movingComponentId) {
+function findAutoContactCandidateForTargetsInCircuit(circuit, movingComponentId, targetComponents) {
   const movingComponent = getComponentByIdFromCollection(circuit.components, movingComponentId);
   if (!movingComponent) return null;
 
-  const overlappingComponents = circuit.components.filter(
-    (component) =>
-      component.id !== movingComponentId && componentsOverlap(movingComponent, component, 0)
+  const overlappingComponents = targetComponents.filter((component) =>
+    componentsOverlap(movingComponent, component, 0)
   );
   if (overlappingComponents.length === 0) {
     return null;
@@ -636,6 +807,14 @@ function findAutoContactCandidateInCircuit(circuit, movingComponentId) {
   }
 
   return matches.length > 0 ? { matches } : null;
+}
+
+function findAutoContactCandidateInCircuit(circuit, movingComponentId) {
+  return findAutoContactCandidateForTargetsInCircuit(
+    circuit,
+    movingComponentId,
+    circuit.components.filter((component) => component.id !== movingComponentId)
+  );
 }
 
 function findDirectWireBetweenInCircuit(circuit, firstRef, secondRef) {
@@ -987,6 +1166,43 @@ function worldToLocal(component, worldX, worldY) {
   };
 }
 
+function isComponentGroupSelected(componentId, circuit = state) {
+  return circuit.selectedComponentIds instanceof Set && circuit.selectedComponentIds.has(componentId);
+}
+
+function toggleComponentInGroupSelection(componentId) {
+  if (!state.groupSelectMode) {
+    return false;
+  }
+
+  clearNonComponentSelection();
+  state.pendingTerminal = null;
+
+  if (state.selectedComponentIds.has(componentId)) {
+    state.selectedComponentIds.delete(componentId);
+  } else {
+    state.selectedComponentIds.add(componentId);
+  }
+
+  updateSelectionUi();
+  return state.selectedComponentIds.has(componentId);
+}
+
+function setGroupSelectionMode(active) {
+  if (!active) {
+    clearSelection();
+    return;
+  }
+
+  clearSelectionState();
+  state.groupSelectMode = true;
+  updateSelectionUi();
+}
+
+function toggleGroupSelectionMode() {
+  setGroupSelectionMode(!state.groupSelectMode);
+}
+
 function selectComponent(componentId) {
   clearSelectionState();
   state.selectedComponentId = componentId;
@@ -1255,6 +1471,14 @@ function clearInvalidSelectionsInCircuit(circuit) {
     changed = true;
   }
 
+  if (circuit.selectedComponentIds instanceof Set) {
+    for (const componentId of [...circuit.selectedComponentIds]) {
+      if (getComponentByIdFromCollection(circuit.components, componentId)) continue;
+      circuit.selectedComponentIds.delete(componentId);
+      changed = true;
+    }
+  }
+
   const selectedWire =
     circuit.selectedWireId != null
       ? getWireByIdFromCollection(circuit.wires, circuit.selectedWireId)
@@ -1447,11 +1671,16 @@ function deriveSelectionUiState() {
   const terminalLabelTarget = getTerminalLabelEditorTarget();
   const terminalLabelSelected = state.selectedTerminalLabelKey != null;
   const nodeMarker = getSelectedNodeMarker();
+  const groupSelectionActive = state.groupSelectMode === true;
+  const hasGroupedComponents =
+    state.selectedComponentIds instanceof Set && state.selectedComponentIds.size > 0;
   const canExport = state.components.length > 0;
 
   const uiState = {
     showThemeToggle: false,
     showEditTerminalLabel: terminalLabelTarget != null,
+    showGroupSelect: false,
+    groupSelectActive: false,
     showExport: false,
     showCurrentArrow: false,
     showRotate: false,
@@ -1465,10 +1694,20 @@ function deriveSelectionUiState() {
     syncWheel: false,
   };
 
+  if (groupSelectionActive) {
+    uiState.resetDeleteHold = true;
+    uiState.showEditTerminalLabel = false;
+    uiState.showGroupSelect = canExport;
+    uiState.groupSelectActive = true;
+    uiState.showExport = canExport && !hasGroupedComponents;
+    return uiState;
+  }
+
   if (!component && !wire && !nodeMarker && !terminalLabelSelected && !terminalPending) {
     uiState.resetDeleteHold = true;
     uiState.showThemeToggle = true;
     uiState.showEditTerminalLabel = false;
+    uiState.showGroupSelect = canExport;
     uiState.showExport = canExport;
     return uiState;
   }
@@ -1544,12 +1783,20 @@ function applySelectionUiState(uiState) {
 
   appEls.themeToggleBtn.classList.toggle("hidden", !uiState.showThemeToggle);
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !uiState.showEditTerminalLabel);
+  appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);
+  appEls.groupSelectBtn.classList.toggle("active", !!uiState.groupSelectActive);
   appEls.exportBtn.classList.toggle("hidden", !uiState.showExport);
   appEls.currentArrowBtn.classList.toggle("hidden", !uiState.showCurrentArrow);
   appEls.rotateBtn.classList.toggle("hidden", !uiState.showRotate);
   appEls.deleteBtn.classList.toggle("hidden", !uiState.showDelete);
   appEls.swapOpAmpBtn.classList.toggle("hidden", !uiState.showSwap);
   appEls.valueWheel.classList.toggle("hidden", !uiState.showValueWheel);
+  appEls.groupSelectBtn.title = uiState.groupSelectActive ? "Sair da seleção em grupo" : "Selecionar varios";
+  appEls.groupSelectBtn.setAttribute(
+    "aria-label",
+    uiState.groupSelectActive ? "Sair da seleção em grupo" : "Selecionar varios"
+  );
+  appEls.groupSelectBtn.setAttribute("aria-pressed", uiState.groupSelectActive ? "true" : "false");
 
   if (uiState.visibilityToggleState) {
     setVisibilityToggleButtonState(uiState.visibilityToggleState);

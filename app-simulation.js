@@ -113,7 +113,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     isIdealVoltageSourceComponent(component)
   );
   const diodes = activeComponents.filter((component) => component.type === "diode");
-  const bjts = activeComponents.filter((component) => component.type === "bjt_npn");
+  const bjts = activeComponents.filter((component) => isBjtComponentType(component));
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
 
   const N = nonGroundRoots.length;
@@ -190,7 +190,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       componentCurrents.set(component.id, component.value || 0);
     } else if (component.type === "diode") {
       componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
-    } else if (component.type === "bjt_npn") {
+    } else if (isBjtComponentType(component)) {
       const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
       const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
       const rCollector = rootByTerminal.get(terminalKey(component.id, collectorIndex));

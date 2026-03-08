@@ -414,12 +414,24 @@ button.secondary {
   box-shadow: var(--shadow-button);
 }
 
+button.secondary.active {
+  color: #ffffff;
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  border-color: var(--accent-strong);
+  box-shadow: var(--accent-shadow);
+}
+
 button.secondary svg {
   width: 24px;
   height: 24px;
   display: block;
   margin: 0 auto;
   fill: currentColor;
+}
+
+#group-select-btn svg {
+  fill: none;
+  stroke: currentColor;
 }
 
 button.secondary.danger {

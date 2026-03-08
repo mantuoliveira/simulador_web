@@ -37,6 +37,14 @@ function setupCanvasGestures() {
         return;
       }
 
+      if (state.pointer.mode === "group-press" && event.touches.length >= 1) {
+        const touch = findTouchById(event.touches, state.pointer.activeTouchId);
+        if (touch) {
+          moveGroupPress(touch, "drag");
+        }
+        return;
+      }
+
       if (state.pointer.mode === "pan" && event.touches.length >= 1) {
         const touch = findTouchById(event.touches, state.pointer.activeTouchId);
         if (touch) {
@@ -68,6 +76,16 @@ function setupCanvasGestures() {
           state.pointer.activeTouchId = null;
           state.pointer.dragComponentId = null;
           state.pointer.emptyTapCandidate = false;
+        }
+        return;
+      }
+
+      if (state.pointer.mode === "group-press") {
+        const ended = Array.from(event.changedTouches).some(
+          (touch) => touch.identifier === state.pointer.activeTouchId
+        );
+        if (ended) {
+          finishGroupPressSelection();
         }
         return;
       }
@@ -117,6 +135,27 @@ function setupCanvasGestures() {
   appEls.canvas.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
     const canvasPoint = clientToCanvas(event.clientX, event.clientY);
+    const point = clientToWorld(event.clientX, event.clientY);
+    if (state.groupSelectMode) {
+      clearEmptyCanvasTapHistory();
+      const groupSelectableComponent = pickGroupSelectableComponent(
+        point.x,
+        point.y,
+        MOUSE_TERMINAL_HIT_RADIUS
+      );
+      if (groupSelectableComponent) {
+        startGroupPressSelection(groupSelectableComponent, point, canvasPoint, {
+          mode: "mouse-group-press",
+        });
+        return;
+      }
+
+      if (!pickNodeMarker(canvasPoint.x, canvasPoint.y) && isCanvasPointEmpty(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS)) {
+        clearSelection();
+      }
+      return;
+    }
+
     const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
     if (nodeMarkerHit) {
       clearEmptyCanvasTapHistory();
@@ -131,7 +170,6 @@ function setupCanvasGestures() {
       return;
     }
 
-    const point = clientToWorld(event.clientX, event.clientY);
     const terminalHit = pickTerminal(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS);
     if (terminalHit) {
       clearEmptyCanvasTapHistory();
@@ -190,6 +228,11 @@ function setupCanvasGestures() {
   );
 
   window.addEventListener("mousemove", (event) => {
+    if (state.pointer.mode === "mouse-group-press") {
+      moveGroupPress(event, "mouse-drag");
+      return;
+    }
+
     if (state.pointer.mode === "mouse-drag") {
       const component = getComponentById(state.pointer.dragComponentId);
       if (!component) return;
@@ -198,6 +241,11 @@ function setupCanvasGestures() {
       const targetX = Math.round(point.x - state.pointer.dragOffsetX);
       const targetY = Math.round(point.y - state.pointer.dragOffsetY);
       if (targetX === component.x && targetY === component.y) return;
+      if (state.groupSelectMode && isComponentGroupSelected(component.id)) {
+        tryMoveSelectedComponents(component.id, targetX, targetY);
+        return;
+      }
+
       tryMoveComponent(component.id, targetX, targetY);
       return;
     }
@@ -208,9 +256,13 @@ function setupCanvasGestures() {
   });
 
   window.addEventListener("mouseup", () => {
+    if (state.pointer.mode === "mouse-group-press") {
+      finishGroupPressSelection();
+      return;
+    }
+
     if (state.pointer.mode === "mouse-drag" || state.pointer.mode === "mouse-pan") {
-      state.pointer.mode = "none";
-      state.pointer.dragComponentId = null;
+      finishPointerInteraction();
     }
   });
 
@@ -283,9 +335,95 @@ function setupNativeZoomGuards() {
   document.addEventListener("gestureend", preventGesture, { passive: false });
 }
 
+function finishPointerInteraction() {
+  state.pointer.mode = "none";
+  state.pointer.activeTouchId = null;
+  state.pointer.dragComponentId = null;
+  state.pointer.emptyTapCandidate = false;
+}
+
+function pickGroupSelectableComponent(worldX, worldY, terminalThreshold) {
+  const terminalHit = pickTerminal(worldX, worldY, terminalThreshold);
+  if (terminalHit) {
+    return getComponentById(terminalHit.componentId);
+  }
+
+  return pickComponentBody(worldX, worldY);
+}
+
+function startGroupPressSelection(component, worldPoint, canvasPoint, { mode, activeTouchId = null } = {}) {
+  state.pointer.mode = mode;
+  state.pointer.activeTouchId = activeTouchId;
+  state.pointer.dragComponentId = component.id;
+  state.pointer.dragOffsetX = worldPoint.x - component.x;
+  state.pointer.dragOffsetY = worldPoint.y - component.y;
+  state.pointer.tapStartScreenX = canvasPoint.x;
+  state.pointer.tapStartScreenY = canvasPoint.y;
+  state.pointer.emptyTapCandidate = false;
+}
+
+function moveGroupPress(pointerLike, dragMode) {
+  const component = getComponentById(state.pointer.dragComponentId);
+  if (!component) return;
+
+  const canvasPoint = clientToCanvas(pointerLike.clientX, pointerLike.clientY);
+  if (
+    distance(
+      canvasPoint.x,
+      canvasPoint.y,
+      state.pointer.tapStartScreenX,
+      state.pointer.tapStartScreenY
+    ) <= EMPTY_TAP_MOVE_TOLERANCE_PX
+  ) {
+    return;
+  }
+
+  if (!isComponentGroupSelected(component.id)) {
+    state.selectedComponentIds.add(component.id);
+    updateSelectionUi();
+  }
+
+  state.pointer.mode = dragMode;
+
+  const point = clientToWorld(pointerLike.clientX, pointerLike.clientY);
+  const targetX = Math.round(point.x - state.pointer.dragOffsetX);
+  const targetY = Math.round(point.y - state.pointer.dragOffsetY);
+  if (targetX === component.x && targetY === component.y) return;
+  tryMoveSelectedComponents(component.id, targetX, targetY);
+}
+
+function finishGroupPressSelection() {
+  const componentId = state.pointer.dragComponentId;
+  finishPointerInteraction();
+  if (componentId == null) return;
+  toggleComponentInGroupSelection(componentId);
+}
 
 function startSingleTouch(touch) {
   const canvasPoint = clientToCanvas(touch.clientX, touch.clientY);
+  const point = clientToWorld(touch.clientX, touch.clientY);
+  if (state.groupSelectMode) {
+    clearEmptyCanvasTapHistory();
+    const groupSelectableComponent = pickGroupSelectableComponent(
+      point.x,
+      point.y,
+      TOUCH_TERMINAL_HIT_RADIUS
+    );
+    if (groupSelectableComponent) {
+      startGroupPressSelection(groupSelectableComponent, point, canvasPoint, {
+        mode: "group-press",
+        activeTouchId: touch.identifier,
+      });
+      return;
+    }
+
+    if (!pickNodeMarker(canvasPoint.x, canvasPoint.y) && isCanvasPointEmpty(point.x, point.y, TOUCH_TERMINAL_HIT_RADIUS)) {
+      clearSelection();
+      state.pointer.mode = "none";
+    }
+    return;
+  }
+
   const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
   if (nodeMarkerHit) {
     clearEmptyCanvasTapHistory();
@@ -301,8 +439,6 @@ function startSingleTouch(touch) {
     state.pointer.mode = "none";
     return;
   }
-
-  const point = clientToWorld(touch.clientX, touch.clientY);
 
   const terminalHit = pickTerminal(point.x, point.y, TOUCH_TERMINAL_HIT_RADIUS);
   if (terminalHit) {
@@ -351,6 +487,11 @@ function moveDrag(touch) {
   const targetY = Math.round(point.y - state.pointer.dragOffsetY);
 
   if (targetX === component.x && targetY === component.y) return;
+
+  if (state.groupSelectMode && isComponentGroupSelected(component.id)) {
+    tryMoveSelectedComponents(component.id, targetX, targetY);
+    return;
+  }
 
   tryMoveComponent(component.id, targetX, targetY);
 }
@@ -508,4 +649,3 @@ function findTouchById(touchList, id) {
   }
   return null;
 }
-
