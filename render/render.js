@@ -9,7 +9,10 @@ import {
   getCurrentArrowTerminalPair,
   getValueLabelAnchor,
 } from "../core/behaviors.js";
-import { getOpAmpInputTerminalIndices } from "../core/model.js";
+import {
+  getComponentRenderBounds,
+  getOpAmpInputTerminalIndices,
+} from "../core/model.js";
 import {
   clamp,
   degToRad,
@@ -270,18 +273,11 @@ function drawComponents(renderTarget, showSelection = true) {
     const isSelected =
       showSelection &&
       (state.selectedComponentId === component.id || isComponentGroupSelected(component.id));
-    if (isSelected) {
-      context.strokeStyle = palette.canvasSelection;
-      context.lineWidth = 2;
-      context.strokeRect(
-        -width / 2 + renderOffsetX - 4,
-        -height / 2 + renderOffsetY - 4,
-        width + 8,
-        height + 8
-      );
-    }
-
     context.restore();
+
+    if (isSelected) {
+      drawComponentSelectionOutline(renderTarget, component);
+    }
 
     const terminalCount = def.terminals.length;
     for (let i = 0; i < terminalCount; i += 1) {
@@ -341,6 +337,17 @@ function getTerminalRenderRadius(componentType) {
   const minRadius = isJunction ? 4.2 : 3.4;
   const maxRadius = isJunction ? 10.8 : 8.8;
   return clamp(worldLengthToScreen(gridRadius), minRadius, maxRadius);
+}
+
+function drawComponentSelectionOutline(renderTarget, component) {
+  const { context } = renderTarget;
+  const palette = getRenderThemePalette(renderTarget);
+  const rect = getComponentScreenRect(component);
+  if (!rect) return;
+
+  context.strokeStyle = palette.canvasSelection;
+  context.lineWidth = 2;
+  context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
 }
 
 function drawComponentTerminalLabels(renderTarget, component) {
@@ -596,8 +603,25 @@ function getNodeMarkerCandidateDirections(preferredDirection = "up") {
 function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder) {
   const collisionRect = expandRect(rect, Math.max(3, Math.max(2.1, state.camera.zoom * 2.4) * 0.5 + 2));
   const preferredClearance = Math.max(10, state.camera.zoom * 10);
+  let componentOverlaps = 0;
+  let componentProximityPenalty = 0;
   let wireOverlaps = 0;
   let wireProximityPenalty = 0;
+
+  for (const component of state.components) {
+    const componentRect = getComponentScreenRect(component);
+    if (!componentRect) continue;
+
+    if (rectsIntersect(collisionRect, componentRect)) {
+      componentOverlaps += 1;
+      continue;
+    }
+
+    const distance = distanceRectToRect(collisionRect, componentRect);
+    if (distance < preferredClearance) {
+      componentProximityPenalty += preferredClearance - distance;
+    }
+  }
 
   for (const wire of state.wires) {
     if (!isWireVisible(wire)) continue;
@@ -619,20 +643,30 @@ function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder) {
   }
 
   return {
+    componentOverlaps,
     wireOverlaps,
     overflowPenalty: getRectOverflowPenalty(rect, renderTarget.width, renderTarget.height),
+    componentProximityPenalty,
     wireProximityPenalty,
     directionOrder,
   };
 }
 
 function isBetterNodeMarkerPlacementScore(candidate, currentBest) {
+  if (candidate.componentOverlaps !== currentBest.componentOverlaps) {
+    return candidate.componentOverlaps < currentBest.componentOverlaps;
+  }
+
   if (candidate.wireOverlaps !== currentBest.wireOverlaps) {
     return candidate.wireOverlaps < currentBest.wireOverlaps;
   }
 
   if (Math.abs(candidate.overflowPenalty - currentBest.overflowPenalty) > 1e-9) {
     return candidate.overflowPenalty < currentBest.overflowPenalty;
+  }
+
+  if (Math.abs(candidate.componentProximityPenalty - currentBest.componentProximityPenalty) > 1e-9) {
+    return candidate.componentProximityPenalty < currentBest.componentProximityPenalty;
   }
 
   if (Math.abs(candidate.wireProximityPenalty - currentBest.wireProximityPenalty) > 1e-9) {
@@ -658,6 +692,29 @@ function expandRect(rect, padding) {
     width: rect.width + padding * 2,
     height: rect.height + padding * 2,
   };
+}
+
+function getComponentScreenRect(component) {
+  const bounds = getComponentRenderBounds(component);
+  if (!bounds) return null;
+
+  const topLeft = worldToScreen(bounds.left, bounds.top);
+  const bottomRight = worldToScreen(bounds.right, bounds.bottom);
+  return {
+    x: Math.min(topLeft.x, bottomRight.x),
+    y: Math.min(topLeft.y, bottomRight.y),
+    width: Math.abs(bottomRight.x - topLeft.x),
+    height: Math.abs(bottomRight.y - topLeft.y),
+  };
+}
+
+function rectsIntersect(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
 }
 
 function segmentIntersectsRect(start, end, rect) {
@@ -744,6 +801,12 @@ function distanceSegmentToRect(start, end, rect) {
 function distancePointToRect(x, y, rect) {
   const dx = Math.max(rect.x - x, 0, x - (rect.x + rect.width));
   const dy = Math.max(rect.y - y, 0, y - (rect.y + rect.height));
+  return Math.hypot(dx, dy);
+}
+
+function distanceRectToRect(a, b) {
+  const dx = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width), 0);
+  const dy = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height), 0);
   return Math.hypot(dx, dy);
 }
 
@@ -990,6 +1053,8 @@ export {
   isBetterNodeMarkerPlacementScore,
   getRectOverflowPenalty,
   expandRect,
+  getComponentScreenRect,
+  rectsIntersect,
   segmentIntersectsRect,
   pointInRect,
   segmentsIntersect,
@@ -997,6 +1062,7 @@ export {
   pointOnCollinearSegment,
   distanceSegmentToRect,
   distancePointToRect,
+  distanceRectToRect,
   getTerminalLabelRenderMetrics,
   parseTerminalLabelText,
   getTerminalLabelTextLayout,

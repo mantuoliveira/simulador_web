@@ -430,6 +430,8 @@ button.secondary svg {
 }
 
 #group-select-btn svg {
+  width: 26px;
+  height: 26px;
   fill: none;
   stroke: currentColor;
 }

@@ -287,6 +287,24 @@ function getComponentRenderBounds(component) {
     return getComponentBodyBounds(component);
   }
 
+  if (def.renderBounds) {
+    const corners = [
+      rotateOffset(-def.renderBounds.left, -def.renderBounds.up, component.rotation),
+      rotateOffset(def.renderBounds.right, -def.renderBounds.up, component.rotation),
+      rotateOffset(def.renderBounds.right, def.renderBounds.down, component.rotation),
+      rotateOffset(-def.renderBounds.left, def.renderBounds.down, component.rotation),
+    ];
+
+    const xs = corners.map((corner) => component.x + corner.x);
+    const ys = corners.map((corner) => component.y + corner.y);
+    return {
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+      bottom: Math.max(...ys),
+    };
+  }
+
   const renderW = def.renderW || 0;
   const renderH = def.renderH || 0;
   if (renderW <= 0 || renderH <= 0) {
