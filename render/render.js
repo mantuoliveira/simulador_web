@@ -51,6 +51,8 @@ import {
 
 // Canvas rendering, theme-driven sprite handling, and service worker/render loop setup.
 
+const thermalTintedSpriteCache = new WeakMap();
+
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   window.addEventListener("load", () => {
@@ -255,16 +257,15 @@ function drawComponents(renderTarget, showSelection = true) {
     context.rotate(degToRad(component.rotation));
     behavior.applySpriteTransform(context, component);
     const thermalTint = getComponentThermalTint(component, palette);
+    const renderSprite = getComponentRenderSprite(sprite, thermalTint);
     const spriteX = -width / 2 + renderOffsetX;
     const spriteY = -height / 2 + renderOffsetY;
 
-    if (sprite?.complete) {
-      context.drawImage(sprite, spriteX, spriteY, width, height);
-      applyComponentThermalTint(context, spriteX, spriteY, width, height, thermalTint);
+    if (renderSprite) {
+      context.drawImage(renderSprite, spriteX, spriteY, width, height);
     } else if (width > 0 && height > 0) {
-      context.fillStyle = palette.canvasSpriteFallback;
+      context.fillStyle = thermalTint || palette.canvasSpriteFallback;
       context.fillRect(spriteX, spriteY, width, height);
-      applyComponentThermalTint(context, spriteX, spriteY, width, height, thermalTint);
     }
 
     if (behavior.spriteOverlay === "op_amp_inputs") {
@@ -353,14 +354,39 @@ function drawComponentSelectionOutline(renderTarget, component) {
   context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
 }
 
-function applyComponentThermalTint(context, x, y, width, height, tint) {
-  if (!tint) return;
+function getComponentRenderSprite(sprite, thermalTint) {
+  if (!sprite?.complete) {
+    return null;
+  }
 
-  context.save();
-  context.globalCompositeOperation = "source-atop";
-  context.fillStyle = tint;
-  context.fillRect(x, y, width, height);
-  context.restore();
+  if (!thermalTint) {
+    return sprite;
+  }
+
+  let tintedVariants = thermalTintedSpriteCache.get(sprite);
+  if (!tintedVariants) {
+    tintedVariants = new Map();
+    thermalTintedSpriteCache.set(sprite, tintedVariants);
+  }
+
+  if (tintedVariants.has(thermalTint)) {
+    return tintedVariants.get(thermalTint);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, sprite.naturalWidth || sprite.width || 1);
+  canvas.height = Math.max(1, sprite.naturalHeight || sprite.height || 1);
+  const offscreenContext = canvas.getContext("2d", { alpha: true });
+  if (!offscreenContext) {
+    return sprite;
+  }
+
+  offscreenContext.drawImage(sprite, 0, 0, canvas.width, canvas.height);
+  offscreenContext.globalCompositeOperation = "source-in";
+  offscreenContext.fillStyle = thermalTint;
+  offscreenContext.fillRect(0, 0, canvas.width, canvas.height);
+  tintedVariants.set(thermalTint, canvas);
+  return canvas;
 }
 
 function getComponentThermalTint(component, palette) {
