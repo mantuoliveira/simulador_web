@@ -6,9 +6,20 @@
       name="viewport"
       content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no"
     />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#edf4fb" />
     <title>Simulador de Circuitos DC</title>
     <link rel="manifest" href="manifest.webmanifest" />
+    <script>
+      (() => {
+        const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true;
+        const theme = prefersDark ? "dark" : "light";
+        document.documentElement.dataset.theme = theme;
+        const metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) {
+          metaTheme.setAttribute("content", theme === "dark" ? "#09111c" : "#edf4fb");
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -59,6 +70,35 @@
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path fill="currentColor" d="M8 5.5v13l10-6.5z" />
+            </svg>
+          </button>
+          <button
+            id="theme-toggle-btn"
+            class="secondary icon-only hidden"
+            type="button"
+            title="Ativar tema escuro"
+            aria-label="Ativar tema escuro"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <defs>
+                <clipPath id="theme-toggle-clip">
+                  <circle cx="12" cy="12" r="8" />
+                </clipPath>
+              </defs>
+              <g clip-path="url(#theme-toggle-clip)">
+                <polygon points="4,4 4,20 20,4" fill="#0f172a" />
+                <polygon points="4,20 20,4 20,20" fill="#ffffff" />
+              </g>
+              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5" />
+              <line
+                x1="6.5"
+                y1="17.5"
+                x2="17.5"
+                y2="6.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
             </svg>
           </button>
           <button

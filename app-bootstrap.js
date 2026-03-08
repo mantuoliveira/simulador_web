@@ -1,4 +1,5 @@
 buildComponentStrip();
+applyThemeMode(themeState.mode);
 setupCanvas();
 setupButtons();
 setupKeyboardShortcuts();

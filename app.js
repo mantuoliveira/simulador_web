@@ -50,6 +50,31 @@ const CURRENT_ARROW_BUTTON_ICONS = {
   hidden:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3.27 2 2 3.27l3 3C2.92 7.9 1.52 9.84 1 10.78L.5 12l.5 1.22C1.36 13.78 5.15 19 11 19c2.03 0 3.83-.63 5.38-1.53L20.73 22 22 20.73 3.27 2zM12 16c-2.21 0-4-1.79-4-4 0-.53.1-1.03.29-1.49l5.2 5.2c-.46.19-.96.29-1.49.29zm10.5-4-.5 1.22c-.3.73-1.64 3-3.92 4.8l-1.45-1.45C18.09 15.32 19.3 13.6 19.7 13l.3-.46-.3-.46C19.34 11.53 16.31 7 12 7c-.84 0-1.64.11-2.39.31L8.02 5.72C9.25 5.26 10.57 5 12 5c5.85 0 9.64 5.22 10 5.78L22.5 12zm-6.43.54-4.61-4.61c.18-.02.36-.03.54-.03 2.21 0 4 1.79 4 4 0 .18-.01.36-.03.64z"/></svg>',
 };
+const LIGHT_THEME = "light";
+const DARK_THEME = "dark";
+const THEME_PALETTE_DEFAULTS = {
+  themeColor: "#edf4fb",
+  statusBg: "rgba(15, 23, 42, 0.88)",
+  statusErrorBg: "rgba(185, 28, 28, 0.92)",
+  canvasGrid: "rgba(15, 23, 42, 0.2)",
+  canvasWire: "#0f172a",
+  canvasWireSelected: "#ea580c",
+  canvasSelection: "#0ea5a8",
+  canvasPendingFill: "rgba(245, 158, 11, 0.2)",
+  canvasPendingStroke: "#f59e0b",
+  canvasSpriteFallback: "#dbe4ef",
+  canvasTerminalFilled: "#0f172a",
+  canvasTerminalEmpty: "#f8fafc",
+  canvasTerminalStroke: "#334155",
+  canvasLabel: "#0f172a",
+  canvasLabelSelected: "#0ea5a8",
+  canvasAnnotationBg: "rgba(15, 23, 42, 0.86)",
+  canvasAnnotationText: "#f8fafc",
+  canvasCurrent: "#dc2626",
+  canvasCurrentText: "#7f1d1d",
+  canvasSpriteStroke: "#0f172a",
+  canvasSpriteFill: "#e2e8f0",
+};
 
 const COMPONENT_DEFS = {
   voltage_source: {
@@ -503,6 +528,7 @@ const state = {
   simulationActive: false,
   simulationResult: null,
   hiddenNodeMarkerRoots: new Set(),
+  groundNodeLabelsInitialized: false,
   camera: {
     offsetX: 0,
     offsetY: 0,
@@ -533,6 +559,7 @@ const appEls = {
   canvasWrap: document.getElementById("canvas-wrap"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
+  themeToggleBtn: document.getElementById("theme-toggle-btn"),
   editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
   exportBtn: document.getElementById("export-btn"),
   currentArrowBtn: document.getElementById("current-arrow-btn"),
@@ -589,7 +616,15 @@ const terminalLabelEditorState = {
   terminalRef: null,
 };
 
-const spriteMap = loadSprites();
+const themeState = {
+  mode: document.documentElement.dataset.theme === DARK_THEME ? DARK_THEME : LIGHT_THEME,
+};
+let themePalette = {};
+
+refreshThemePalette();
+updateThemeColorMeta(themePalette.themeColor);
+
+let spriteMap = loadSprites();
 
 function createRenderTarget(
   canvas,
@@ -641,10 +676,146 @@ function loadSprites() {
       showPolarityMarkers: type !== "voltage_source",
     });
     const image = new Image();
+    image.addEventListener("load", () => {
+      requestRender(true);
+    });
     image.src = svgToDataUri(svg);
     sprites[type] = image;
   }
   return sprites;
+}
+
+function refreshComponentStripIcons() {
+  if (!appEls.strip) return;
+
+  const buttons = appEls.strip.querySelectorAll(".comp-btn");
+  for (const button of buttons) {
+    const type = button.dataset.type;
+    const img = button.querySelector("img");
+    if (!type || !img) continue;
+    img.src = svgToDataUri(buildSvgForType(type));
+  }
+}
+
+function refreshThemePalette() {
+  const styles = getComputedStyle(document.documentElement);
+  themePalette = {
+    themeColor: readThemeCssVar(styles, "--theme-color", THEME_PALETTE_DEFAULTS.themeColor),
+    statusBg: readThemeCssVar(styles, "--status-bg", THEME_PALETTE_DEFAULTS.statusBg),
+    statusErrorBg: readThemeCssVar(styles, "--status-error-bg", THEME_PALETTE_DEFAULTS.statusErrorBg),
+    canvasGrid: readThemeCssVar(styles, "--canvas-grid", THEME_PALETTE_DEFAULTS.canvasGrid),
+    canvasWire: readThemeCssVar(styles, "--canvas-wire", THEME_PALETTE_DEFAULTS.canvasWire),
+    canvasWireSelected: readThemeCssVar(
+      styles,
+      "--canvas-wire-selected",
+      THEME_PALETTE_DEFAULTS.canvasWireSelected
+    ),
+    canvasSelection: readThemeCssVar(
+      styles,
+      "--canvas-selection",
+      THEME_PALETTE_DEFAULTS.canvasSelection
+    ),
+    canvasPendingFill: readThemeCssVar(
+      styles,
+      "--canvas-pending-fill",
+      THEME_PALETTE_DEFAULTS.canvasPendingFill
+    ),
+    canvasPendingStroke: readThemeCssVar(
+      styles,
+      "--canvas-pending-stroke",
+      THEME_PALETTE_DEFAULTS.canvasPendingStroke
+    ),
+    canvasSpriteFallback: readThemeCssVar(
+      styles,
+      "--canvas-sprite-fallback",
+      THEME_PALETTE_DEFAULTS.canvasSpriteFallback
+    ),
+    canvasTerminalFilled: readThemeCssVar(
+      styles,
+      "--canvas-terminal-filled",
+      THEME_PALETTE_DEFAULTS.canvasTerminalFilled
+    ),
+    canvasTerminalEmpty: readThemeCssVar(
+      styles,
+      "--canvas-terminal-empty",
+      THEME_PALETTE_DEFAULTS.canvasTerminalEmpty
+    ),
+    canvasTerminalStroke: readThemeCssVar(
+      styles,
+      "--canvas-terminal-stroke",
+      THEME_PALETTE_DEFAULTS.canvasTerminalStroke
+    ),
+    canvasLabel: readThemeCssVar(styles, "--canvas-label", THEME_PALETTE_DEFAULTS.canvasLabel),
+    canvasLabelSelected: readThemeCssVar(
+      styles,
+      "--canvas-label-selected",
+      THEME_PALETTE_DEFAULTS.canvasLabelSelected
+    ),
+    canvasAnnotationBg: readThemeCssVar(
+      styles,
+      "--canvas-annotation-bg",
+      THEME_PALETTE_DEFAULTS.canvasAnnotationBg
+    ),
+    canvasAnnotationText: readThemeCssVar(
+      styles,
+      "--canvas-annotation-text",
+      THEME_PALETTE_DEFAULTS.canvasAnnotationText
+    ),
+    canvasCurrent: readThemeCssVar(styles, "--canvas-current", THEME_PALETTE_DEFAULTS.canvasCurrent),
+    canvasCurrentText: readThemeCssVar(
+      styles,
+      "--canvas-current-text",
+      THEME_PALETTE_DEFAULTS.canvasCurrentText
+    ),
+    canvasSpriteStroke: readThemeCssVar(
+      styles,
+      "--canvas-sprite-stroke",
+      THEME_PALETTE_DEFAULTS.canvasSpriteStroke
+    ),
+    canvasSpriteFill: readThemeCssVar(
+      styles,
+      "--canvas-sprite-fill",
+      THEME_PALETTE_DEFAULTS.canvasSpriteFill
+    ),
+  };
+}
+
+function readThemeCssVar(styles, name, fallback) {
+  const value = styles.getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function updateThemeColorMeta(color) {
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme && color) {
+    metaTheme.setAttribute("content", color);
+  }
+}
+
+function updateThemeToggleButtonState() {
+  if (!appEls.themeToggleBtn) return;
+
+  const nextThemeLabel =
+    themeState.mode === DARK_THEME ? "Ativar tema claro" : "Ativar tema escuro";
+  appEls.themeToggleBtn.title = nextThemeLabel;
+  appEls.themeToggleBtn.setAttribute("aria-label", nextThemeLabel);
+  appEls.themeToggleBtn.setAttribute("aria-pressed", themeState.mode === DARK_THEME ? "true" : "false");
+}
+
+function applyThemeMode(mode, { announce = false } = {}) {
+  const nextMode = mode === DARK_THEME ? DARK_THEME : LIGHT_THEME;
+  themeState.mode = nextMode;
+  document.documentElement.dataset.theme = nextMode;
+  refreshThemePalette();
+  updateThemeColorMeta(themePalette.themeColor);
+  spriteMap = loadSprites();
+  refreshComponentStripIcons();
+  updateThemeToggleButtonState();
+  requestRender(true);
+
+  if (announce) {
+    showStatus(nextMode === DARK_THEME ? "Tema escuro ativo" : "Tema claro ativo");
+  }
 }
 
 function buildComponentStrip() {
@@ -731,7 +902,14 @@ function resizeCanvas() {
 
 function setupButtons() {
   setSimulationButtonState(false);
+  updateThemeToggleButtonState();
   setupTerminalLabelModal();
+
+  appEls.themeToggleBtn.addEventListener("click", () => {
+    applyThemeMode(themeState.mode === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
+      announce: true,
+    });
+  });
 
   appEls.editTerminalLabelBtn.addEventListener("click", () => {
     const terminalRef = getTerminalLabelEditorTarget();
@@ -753,6 +931,7 @@ function setupButtons() {
         return;
       }
       state.simulationActive = true;
+      applyDefaultGroundNodeMarkerVisibility();
       setSimulationButtonState(true);
       updateSelectionUi();
       showStatus("Simulação DC ativa");
@@ -762,6 +941,7 @@ function setupButtons() {
     state.simulationActive = false;
     state.simulationResult = null;
     state.hiddenNodeMarkerRoots.clear();
+    state.groundNodeLabelsInitialized = false;
     state.selectedNodeMarkerRoot = null;
     state.selectedNodeMarkerTerminal = null;
     setSimulationButtonState(false);
@@ -822,6 +1002,7 @@ function clearCircuit() {
   state.simulationActive = false;
   state.simulationResult = null;
   state.hiddenNodeMarkerRoots.clear();
+  state.groundNodeLabelsInitialized = false;
 
   setSimulationButtonState(false);
   closeTerminalLabelEditor();
@@ -1617,10 +1798,10 @@ function drawScene(options = {}, renderTarget = mainRenderTarget) {
       const sp = worldToScreen(terminal.x, terminal.y);
       context.beginPath();
       context.arc(sp.x, sp.y, 8, 0, Math.PI * 2);
-      context.fillStyle = "rgba(245, 158, 11, 0.2)";
+      context.fillStyle = themePalette.canvasPendingFill;
       context.fill();
       context.lineWidth = 2;
-      context.strokeStyle = "#f59e0b";
+      context.strokeStyle = themePalette.canvasPendingStroke;
       context.stroke();
     }
   }
@@ -1641,7 +1822,7 @@ function drawGrid(renderTarget) {
   const maxY = Math.ceil(bottomRight.y) + 1;
 
   const r = Math.max(0.8, Math.min(1.8, state.camera.zoom * 1.15));
-  context.fillStyle = "rgba(15, 23, 42, 0.2)";
+  context.fillStyle = themePalette.canvasGrid;
 
   for (let x = minX; x <= maxX; x += 1) {
     for (let y = minY; y <= maxY; y += 1) {
@@ -1673,7 +1854,7 @@ function drawWires(renderTarget, showSelection = true) {
 
     const isSelected = showSelection && state.selectedWireId === wire.id;
     context.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
-    context.strokeStyle = isSelected ? "#ea580c" : "#0f172a";
+    context.strokeStyle = isSelected ? themePalette.canvasWireSelected : themePalette.canvasWire;
     context.stroke();
   }
 }
@@ -1704,14 +1885,14 @@ function drawComponents(renderTarget, showSelection = true) {
         height
       );
     } else if (width > 0 && height > 0) {
-      context.fillStyle = "#dbe4ef";
+      context.fillStyle = themePalette.canvasSpriteFallback;
       context.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
     }
 
     behavior.drawSpriteOverlay(component, renderTarget);
 
     if (showSelection && state.selectedComponentId === component.id) {
-      context.strokeStyle = "#0ea5a8";
+      context.strokeStyle = themePalette.canvasSelection;
       context.lineWidth = 2;
       context.strokeRect(
         -width / 2 + renderOffsetX - 4,
@@ -1745,15 +1926,18 @@ function drawComponents(renderTarget, showSelection = true) {
       context.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
       context.fillStyle =
         component.type === "junction"
-          ? "#0f172a"
+          ? themePalette.canvasTerminalFilled
           : isPending || isNodeMarkerTerminalSelected
-            ? "#f59e0b"
+            ? themePalette.canvasPendingStroke
             : connected
-              ? "#0f172a"
-              : "#f8fafc";
+              ? themePalette.canvasTerminalFilled
+              : themePalette.canvasTerminalEmpty;
       context.fill();
       context.lineWidth = 1.5;
-      context.strokeStyle = component.type === "junction" || connected ? "#0f172a" : "#334155";
+      context.strokeStyle =
+        component.type === "junction" || connected
+          ? themePalette.canvasTerminalFilled
+          : themePalette.canvasTerminalStroke;
       context.stroke();
     }
 
@@ -1764,7 +1948,7 @@ function drawComponents(renderTarget, showSelection = true) {
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = formatComponentValue(component);
       context.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
-      context.fillStyle = "#0f172a";
+      context.fillStyle = themePalette.canvasLabel;
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(valueText, screenPoint.x, screenPoint.y);
@@ -1794,7 +1978,10 @@ function drawComponentTerminalLabels(renderTarget, component) {
     if (!metrics) continue;
 
     const { context } = renderTarget;
-    context.fillStyle = state.selectedTerminalLabelKey === metrics.labelKey ? "#0ea5a8" : "#0f172a";
+    context.fillStyle =
+      state.selectedTerminalLabelKey === metrics.labelKey
+        ? themePalette.canvasLabelSelected
+        : themePalette.canvasLabel;
     drawTerminalLabelText(context, metrics);
   }
 }
@@ -1809,7 +1996,7 @@ function drawOpAmpInputMarkers(renderTarget, component) {
 
   const markerOffsetX = 1.8;
   const halfSpan = Math.max(4.8, worldLengthToScreen(0.18));
-  context.strokeStyle = "#0f172a";
+  context.strokeStyle = themePalette.canvasSpriteStroke;
   context.lineWidth = Math.max(2.2, state.camera.zoom * 2.2);
   context.lineCap = "round";
 
@@ -1856,7 +2043,7 @@ function drawVoltageSourcePolarityMarkers(renderTarget, component) {
 
   context.save();
   context.rotate(-rotationRad);
-  context.strokeStyle = "#0f172a";
+  context.strokeStyle = themePalette.canvasSpriteStroke;
   context.lineWidth = Math.max(2, worldLengthToScreen(0.15));
   context.lineCap = "round";
 
@@ -1879,18 +2066,33 @@ function drawSimulationAnnotations(renderTarget, data) {
     if (state.hiddenNodeMarkerRoots.has(marker.root)) continue;
     const metrics = getNodeMarkerRenderMetrics(renderTarget, marker);
 
-    context.fillStyle = "rgba(15, 23, 42, 0.86)";
-    roundedRect(context, metrics.boxX, metrics.boxY, metrics.boxW, metrics.boxH, 8);
+    context.fillStyle = themePalette.canvasAnnotationBg;
+    roundedRect(
+      context,
+      metrics.boxX,
+      metrics.boxY,
+      metrics.boxW,
+      metrics.boxH,
+      metrics.cornerRadius
+    );
     context.fill();
 
     if (state.selectedNodeMarkerRoot === marker.root) {
       context.lineWidth = 2;
-      context.strokeStyle = "#0ea5a8";
-      roundedRect(context, metrics.boxX, metrics.boxY, metrics.boxW, metrics.boxH, 8);
+      context.strokeStyle = themePalette.canvasSelection;
+      roundedRect(
+        context,
+        metrics.boxX,
+        metrics.boxY,
+        metrics.boxW,
+        metrics.boxH,
+        metrics.cornerRadius
+      );
       context.stroke();
     }
 
-    context.fillStyle = "#f8fafc";
+    context.font = metrics.font;
+    context.fillStyle = themePalette.canvasAnnotationText;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(metrics.label, metrics.textX, metrics.textY);
@@ -1911,16 +2113,24 @@ function getNodeMarkerRenderMetrics(renderTarget, marker) {
   const { context } = renderTarget;
   const sp = worldToScreen(marker.x, marker.y);
   const label = `${formatVoltage(marker.voltage)}`;
+  const fontPx = clamp(12 * state.camera.zoom, 10, 28);
+  const font = `${fontPx}px "Avenir Next", sans-serif`;
+  const padX = clamp(fontPx * 0.58, 7, 14);
+  const padY = clamp(fontPx * 0.35, 4, 10);
+  const gap = clamp(fontPx * 0.66, 8, 16);
+  const cornerRadius = clamp(fontPx * 0.5, 8, 14);
 
-  context.font = '12px "Avenir Next", sans-serif';
+  context.font = font;
   const textW = context.measureText(label).width;
-  const padX = 7;
   const boxW = textW + padX * 2;
-  const boxH = 20;
-  const placement = getNodeMarkerPlacement(sp, boxW, boxH, marker.labelDirection);
+  const boxH = fontPx + padY * 2;
+  const placement = chooseNodeMarkerPlacement(renderTarget, sp, boxW, boxH, marker.labelDirection, gap);
 
   return {
     label,
+    font,
+    cornerRadius,
+    labelDirection: placement.labelDirection,
     boxW,
     boxH,
     boxX: placement.boxX,
@@ -1930,9 +2140,7 @@ function getNodeMarkerRenderMetrics(renderTarget, marker) {
   };
 }
 
-function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") {
-  const gap = 8;
-
+function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up", gap = 8) {
   if (labelDirection === "down") {
     return {
       boxX: screenPoint.x - boxW * 0.5,
@@ -1966,6 +2174,198 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") 
     textX: screenPoint.x,
     textY: screenPoint.y - gap - boxH * 0.5,
   };
+}
+
+function chooseNodeMarkerPlacement(renderTarget, screenPoint, boxW, boxH, preferredDirection = "up", gap = 8) {
+  const directions = getNodeMarkerCandidateDirections(preferredDirection);
+  let bestPlacement = null;
+  let bestScore = null;
+
+  for (let index = 0; index < directions.length; index += 1) {
+    const labelDirection = directions[index];
+    const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection, gap);
+    const rect = {
+      x: placement.boxX,
+      y: placement.boxY,
+      width: boxW,
+      height: boxH,
+    };
+    const score = getNodeMarkerPlacementScore(renderTarget, rect, index);
+
+    if (!bestScore || isBetterNodeMarkerPlacementScore(score, bestScore)) {
+      bestPlacement = {
+        ...placement,
+        labelDirection,
+      };
+      bestScore = score;
+    }
+  }
+
+  return (
+    bestPlacement || {
+      ...getNodeMarkerPlacement(screenPoint, boxW, boxH, preferredDirection, gap),
+      labelDirection: preferredDirection,
+    }
+  );
+}
+
+function getNodeMarkerCandidateDirections(preferredDirection = "up") {
+  const ordered = [preferredDirection, "up", "down", "right", "left"];
+  return [...new Set(ordered.filter(Boolean))];
+}
+
+function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder) {
+  const collisionRect = expandRect(rect, Math.max(3, Math.max(2.1, state.camera.zoom * 2.4) * 0.5 + 2));
+  const preferredClearance = Math.max(10, state.camera.zoom * 10);
+  let wireOverlaps = 0;
+  let wireProximityPenalty = 0;
+
+  for (const wire of state.wires) {
+    if (!isWireVisible(wire)) continue;
+
+    for (let index = 1; index < wire.path.length; index += 1) {
+      const start = worldToScreen(wire.path[index - 1].x, wire.path[index - 1].y);
+      const end = worldToScreen(wire.path[index].x, wire.path[index].y);
+
+      if (segmentIntersectsRect(start, end, collisionRect)) {
+        wireOverlaps += 1;
+        continue;
+      }
+
+      const distance = distanceSegmentToRect(start, end, collisionRect);
+      if (distance < preferredClearance) {
+        wireProximityPenalty += preferredClearance - distance;
+      }
+    }
+  }
+
+  return {
+    wireOverlaps,
+    overflowPenalty: getRectOverflowPenalty(rect, renderTarget.width, renderTarget.height),
+    wireProximityPenalty,
+    directionOrder,
+  };
+}
+
+function isBetterNodeMarkerPlacementScore(candidate, currentBest) {
+  if (candidate.wireOverlaps !== currentBest.wireOverlaps) {
+    return candidate.wireOverlaps < currentBest.wireOverlaps;
+  }
+
+  if (Math.abs(candidate.overflowPenalty - currentBest.overflowPenalty) > 1e-9) {
+    return candidate.overflowPenalty < currentBest.overflowPenalty;
+  }
+
+  if (Math.abs(candidate.wireProximityPenalty - currentBest.wireProximityPenalty) > 1e-9) {
+    return candidate.wireProximityPenalty < currentBest.wireProximityPenalty;
+  }
+
+  return candidate.directionOrder < currentBest.directionOrder;
+}
+
+function getRectOverflowPenalty(rect, width, height) {
+  return (
+    Math.max(0, -rect.x) +
+    Math.max(0, -rect.y) +
+    Math.max(0, rect.x + rect.width - width) +
+    Math.max(0, rect.y + rect.height - height)
+  );
+}
+
+function expandRect(rect, padding) {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function segmentIntersectsRect(start, end, rect) {
+  if (pointInRect(start.x, start.y, rect) || pointInRect(end.x, end.y, rect)) {
+    return true;
+  }
+
+  const topLeft = { x: rect.x, y: rect.y };
+  const topRight = { x: rect.x + rect.width, y: rect.y };
+  const bottomLeft = { x: rect.x, y: rect.y + rect.height };
+  const bottomRight = { x: rect.x + rect.width, y: rect.y + rect.height };
+
+  return (
+    segmentsIntersect(start, end, topLeft, topRight) ||
+    segmentsIntersect(start, end, topRight, bottomRight) ||
+    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
+    segmentsIntersect(start, end, bottomLeft, topLeft)
+  );
+}
+
+function pointInRect(x, y, rect) {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  if (o1 !== o2 && o3 !== o4) {
+    return true;
+  }
+
+  if (o1 === 0 && pointOnSegment(a, c, b)) return true;
+  if (o2 === 0 && pointOnSegment(a, d, b)) return true;
+  if (o3 === 0 && pointOnSegment(c, a, d)) return true;
+  if (o4 === 0 && pointOnSegment(c, b, d)) return true;
+  return false;
+}
+
+function orientation(a, b, c) {
+  const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+  if (Math.abs(value) <= 1e-9) return 0;
+  return value > 0 ? 1 : 2;
+}
+
+function pointOnSegment(a, b, c) {
+  return (
+    b.x >= Math.min(a.x, c.x) - 1e-9 &&
+    b.x <= Math.max(a.x, c.x) + 1e-9 &&
+    b.y >= Math.min(a.y, c.y) - 1e-9 &&
+    b.y <= Math.max(a.y, c.y) + 1e-9
+  );
+}
+
+function distanceSegmentToRect(start, end, rect) {
+  if (segmentIntersectsRect(start, end, rect)) {
+    return 0;
+  }
+
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x, y: rect.y + rect.height },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+  ];
+
+  let minDistance = Math.min(
+    distancePointToRect(start.x, start.y, rect),
+    distancePointToRect(end.x, end.y, rect)
+  );
+
+  for (const corner of corners) {
+    minDistance = Math.min(
+      minDistance,
+      distanceToSegment(corner.x, corner.y, start.x, start.y, end.x, end.y)
+    );
+  }
+
+  return minDistance;
+}
+
+function distancePointToRect(x, y, rect) {
+  const dx = Math.max(rect.x - x, 0, x - (rect.x + rect.width));
+  const dy = Math.max(rect.y - y, 0, y - (rect.y + rect.height));
+  return Math.hypot(dx, dy);
 }
 
 function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalIndex, label }) {
@@ -2120,8 +2520,8 @@ function drawCurrentArrow(renderTarget, component, current) {
   const s = worldToScreen(start.x, start.y);
   const e = worldToScreen(end.x, end.y);
 
-  context.strokeStyle = "#dc2626";
-  context.fillStyle = "#dc2626";
+  context.strokeStyle = themePalette.canvasCurrent;
+  context.fillStyle = themePalette.canvasCurrent;
   context.lineWidth = Math.max(2.8, state.camera.zoom * 3.2);
 
   context.beginPath();
@@ -2175,7 +2575,7 @@ function drawCurrentArrow(renderTarget, component, current) {
     textY -= textGap * 0.7;
   }
 
-  context.fillStyle = "#7f1d1d";
+  context.fillStyle = themePalette.canvasCurrentText;
   context.textAlign = textAlign;
   context.textBaseline = textBaseline;
   context.fillText(text, textX, textY);
@@ -3796,6 +4196,23 @@ function getSelectedNodeMarker() {
   );
 }
 
+function applyDefaultGroundNodeMarkerVisibility(simulationData = state.simulationResult?.data) {
+  if (!simulationData || state.groundNodeLabelsInitialized) {
+    return;
+  }
+
+  for (const component of state.components) {
+    if (component.type !== "ground") continue;
+
+    const root = simulationData.rootByTerminal?.get(terminalKey(component.id, 0));
+    if (root != null) {
+      state.hiddenNodeMarkerRoots.add(root);
+    }
+  }
+
+  state.groundNodeLabelsInitialized = true;
+}
+
 function getNodeMarkerRootForTerminal(componentId, terminalIndex) {
   if (!state.simulationActive || !state.simulationResult?.ok) {
     return null;
@@ -3835,11 +4252,13 @@ function updateSelectionUi() {
   const nodeMarker = getSelectedNodeMarker();
   const canExport = state.components.length > 0;
 
+  appEls.themeToggleBtn.classList.add("hidden");
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !terminalLabelTarget);
 
   if (!component && !wire && !nodeMarker && !terminalLabelSelected && !terminalPending) {
     clearDeleteButtonHold();
     deleteButtonHoldState.suppressNextClick = false;
+    appEls.themeToggleBtn.classList.remove("hidden");
     appEls.exportBtn.classList.toggle("hidden", !canExport);
     appEls.editTerminalLabelBtn.classList.add("hidden");
     appEls.currentArrowBtn.classList.add("hidden");
@@ -4230,11 +4649,14 @@ function onCircuitChanged() {
       state.simulationActive = false;
       state.simulationResult = null;
       state.hiddenNodeMarkerRoots.clear();
+      state.groundNodeLabelsInitialized = false;
       state.selectedNodeMarkerRoot = null;
       state.selectedNodeMarkerTerminal = null;
       setSimulationButtonState(false);
       updateSelectionUi();
       showStatus(result.message || "Erro na simulação", true);
+    } else {
+      applyDefaultGroundNodeMarkerVisibility();
     }
   }
 
@@ -4248,7 +4670,7 @@ function onCircuitChanged() {
 
 function showStatus(text, isError = false) {
   appEls.status.textContent = text;
-  appEls.status.style.background = isError ? "rgba(185, 28, 28, 0.92)" : "rgba(15, 23, 42, 0.88)";
+  appEls.status.style.background = isError ? themePalette.statusErrorBg : themePalette.statusBg;
   appEls.status.classList.add("show");
 
   clearTimeout(statusTimer);
@@ -4652,9 +5074,17 @@ function buildOpAmpMarkerSvg(y, isPlus, centerX = 50, halfSpan = 6) {
         <line x1="${centerX}" y1="${y - halfSpan}" x2="${centerX}" y2="${y + halfSpan}"/>`;
 }
 
+function getSpriteThemeColors() {
+  return {
+    stroke: themePalette.canvasSpriteStroke || THEME_PALETTE_DEFAULTS.canvasSpriteStroke,
+    fill: themePalette.canvasSpriteFill || THEME_PALETTE_DEFAULTS.canvasSpriteFill,
+  };
+}
+
 function buildDefaultComponentSvg() {
+  const { stroke } = getSpriteThemeColors();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="40" y1="0" x2="40" y2="24"/>
       <line x1="16" y1="26" x2="64" y2="26"/>
       <line x1="24" y1="40" x2="56" y2="40"/>
@@ -4664,8 +5094,9 @@ function buildDefaultComponentSvg() {
 }
 
 function buildResistorSvg() {
+  const { stroke } = getSpriteThemeColors();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="40" x2="34" y2="40"/>
       <polyline points="34,40 44,18 56,62 68,18 80,62 92,18 104,62 116,18 126,40"/>
       <line x1="126" y1="40" x2="160" y2="40"/>
@@ -4674,6 +5105,7 @@ function buildResistorSvg() {
 }
 
 function buildVoltageSourceSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors();
   const showPolarityMarkers = options.showPolarityMarkers !== false;
   const polarityMarkup = showPolarityMarkers
     ? `
@@ -4683,7 +5115,7 @@ function buildVoltageSourceSvg(options = {}) {
     : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="40" x2="42" y2="40"/>
       <line x1="118" y1="40" x2="160" y2="40"/>
       <circle cx="80" cy="40" r="37"/>
@@ -4693,13 +5125,14 @@ function buildVoltageSourceSvg(options = {}) {
 }
 
 function buildCurrentSourceSvg() {
+  const { stroke } = getSpriteThemeColors();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="40" x2="42" y2="40"/>
       <line x1="118" y1="40" x2="160" y2="40"/>
       <circle cx="80" cy="40" r="37"/>
     </g>
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="58" y1="40" x2="102" y2="40"/>
       <polyline points="92,30 102,40 92,50"/>
     </g>
@@ -4707,6 +5140,7 @@ function buildCurrentSourceSvg() {
 }
 
 function buildOpAmpSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors();
   const showMarkers = options.showOpAmpMarkers !== false;
   const plusOnTop = options.opAmpPlusOnTop !== false;
   const markerCenterX = 70;
@@ -4714,7 +5148,7 @@ function buildOpAmpSvg(options = {}) {
   const bottomMarker = showMarkers ? buildOpAmpMarkerSvg(120, !plusOnTop, markerCenterX) : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="40" x2="48" y2="40"/>
       <line x1="0" y1="120" x2="48" y2="120"/>
       <line x1="192" y1="80" x2="240" y2="80"/>
@@ -4726,19 +5160,21 @@ function buildOpAmpSvg(options = {}) {
 }
 
 function buildDiodeSvg() {
+  const { stroke, fill } = getSpriteThemeColors();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
       <line x1="0" y1="40" x2="42" y2="40" fill="none"/>
       <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
-      <polygon points="42,16 42,64 100,40" fill="#e2e8f0"/>
+      <polygon points="42,16 42,64 100,40" fill="${fill}"/>
       <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
     </g>
   </svg>`;
 }
 
 function buildBjtNpnSvg() {
+  const { stroke } = getSpriteThemeColors();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
-    <g stroke="#0f172a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="80" x2="50" y2="80"/>
       <line x1="50" y1="48" x2="50" y2="112"/>
       <line x1="50" y1="80" x2="80" y2="48"/>
