@@ -56,6 +56,8 @@ const THEME_PALETTE_DEFAULTS = {
   themeColor: "#edf4fb",
   statusBg: "rgba(15, 23, 42, 0.88)",
   statusErrorBg: "rgba(185, 28, 28, 0.92)",
+  statusInk: "#f8fafc",
+  statusErrorInk: "#f8fafc",
   canvasGrid: "rgba(15, 23, 42, 0.2)",
   canvasWire: "#0f172a",
   canvasWireSelected: "#ea580c",
@@ -710,6 +712,12 @@ function refreshThemePalette() {
     themeColor: readThemeCssVar(styles, "--theme-color", THEME_PALETTE_DEFAULTS.themeColor),
     statusBg: readThemeCssVar(styles, "--status-bg", THEME_PALETTE_DEFAULTS.statusBg),
     statusErrorBg: readThemeCssVar(styles, "--status-error-bg", THEME_PALETTE_DEFAULTS.statusErrorBg),
+    statusInk: readThemeCssVar(styles, "--status-ink", THEME_PALETTE_DEFAULTS.statusInk),
+    statusErrorInk: readThemeCssVar(
+      styles,
+      "--status-error-ink",
+      THEME_PALETTE_DEFAULTS.statusErrorInk
+    ),
     canvasGrid: readThemeCssVar(styles, "--canvas-grid", THEME_PALETTE_DEFAULTS.canvasGrid),
     canvasWire: readThemeCssVar(styles, "--canvas-wire", THEME_PALETTE_DEFAULTS.canvasWire),
     canvasWireSelected: readThemeCssVar(
@@ -4707,6 +4715,7 @@ function onCircuitChanged() {
 function showStatus(text, isError = false) {
   appEls.status.textContent = text;
   appEls.status.style.background = isError ? themePalette.statusErrorBg : themePalette.statusBg;
+  appEls.status.style.color = isError ? themePalette.statusErrorInk : themePalette.statusInk;
   appEls.status.classList.add("show");
 
   clearTimeout(statusTimer);

@@ -38,6 +38,7 @@
   --status-bg: rgba(15, 23, 42, 0.88);
   --status-error-bg: rgba(185, 28, 28, 0.92);
   --status-ink: #f8fafc;
+  --status-error-ink: #f8fafc;
   --secondary-bg: #ffffff;
   --secondary-border: #cbd5e1;
   --secondary-ink: #1e293b;
@@ -109,9 +110,10 @@
   --shadow-bottom: 0 -10px 24px rgba(2, 6, 23, 0.42);
   --accent-shadow: 0 8px 18px rgba(34, 211, 238, 0.26);
   --danger-shadow: 0 8px 18px rgba(248, 113, 113, 0.28);
-  --status-bg: rgba(9, 17, 28, 0.92);
+  --status-bg: rgba(248, 250, 252, 0.94);
   --status-error-bg: rgba(153, 27, 27, 0.94);
-  --status-ink: #f8fafc;
+  --status-ink: #08111d;
+  --status-error-ink: #fef2f2;
   --secondary-bg: #162235;
   --secondary-border: #3a4d66;
   --secondary-ink: #e2e8f0;
