@@ -12,6 +12,7 @@ import {
   getValueLabelAnchor,
 } from "../core/behaviors.js";
 import {
+  getCardinalValueLabelAnchor,
   getComponentRenderBounds,
   getOpAmpInputTerminalIndices,
 } from "../core/model.js";
@@ -323,7 +324,7 @@ function drawComponents(renderTarget, showSelection = true) {
     drawComponentTerminalLabels(renderTarget, component);
 
     if (def.editable && def.showValueLabel !== false && component.valueLabelHidden !== true) {
-      const labelPoint = getValueLabelAnchor(component);
+      const labelPoint = getComponentCanvasValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = getComponentCanvasValueText(component);
       context.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
@@ -431,6 +432,14 @@ function getComponentCanvasValueText(component) {
   }
 
   return formatComponentValue(component);
+}
+
+function getComponentCanvasValueLabelAnchor(component) {
+  if (component.type === "resistor" && state.thermalModeActive && state.simulationResult?.ok) {
+    return getCardinalValueLabelAnchor(component, 2.35);
+  }
+
+  return getValueLabelAnchor(component);
 }
 
 function drawComponentTerminalLabels(renderTarget, component) {
