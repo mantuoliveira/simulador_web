@@ -1,6 +1,8 @@
 const EXPORT_FILENAME_PREFIX = "circuito";
 const EXPORT_TRIM_PADDING_PX = 12;
 const EXPORT_SCALE = 3;
+const EXPORT_THEME_PALETTE = { ...THEME_PALETTE_DEFAULTS };
+let exportLightSpriteMapPromise = null;
 
 async function handleExportAction({ background = "white" } = {}) {
   if (state.components.length === 0) {
@@ -33,6 +35,7 @@ async function exportCircuitBlob({ background = "white" } = {}) {
   const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
   const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
   const exportDpr = Math.max(1, EXPORT_SCALE);
+  const exportSpriteMap = await getExportLightSpriteMap();
   const exportCanvas = createAlphaCanvas();
   const exportRenderTarget = createRenderTarget(exportCanvas, {
     width,
@@ -47,6 +50,8 @@ async function exportCircuitBlob({ background = "white" } = {}) {
       showGrid: false,
       showSelection: false,
       showPendingTerminal: false,
+      themePalette: EXPORT_THEME_PALETTE,
+      spriteMap: exportSpriteMap,
     },
     exportRenderTarget
   );
@@ -55,6 +60,51 @@ async function exportCircuitBlob({ background = "white" } = {}) {
   const finalCanvas =
     background === "white" ? applyCanvasBackground(trimmedCanvas, "#ffffff") : trimmedCanvas;
   return canvasToBlob(finalCanvas, "image/png");
+}
+
+function getExportLightSpriteMap() {
+  if (!exportLightSpriteMapPromise) {
+    exportLightSpriteMapPromise = buildExportLightSpriteMap().catch((error) => {
+      exportLightSpriteMapPromise = null;
+      throw error;
+    });
+  }
+
+  return exportLightSpriteMapPromise;
+}
+
+async function buildExportLightSpriteMap() {
+  const sprites = createSpriteMap({ palette: EXPORT_THEME_PALETTE }, { notifyOnLoad: false });
+  await Promise.all(Object.values(sprites).map(waitForImageLoad));
+  return sprites;
+}
+
+function waitForImageLoad(image) {
+  if (!image) {
+    return Promise.resolve();
+  }
+
+  if (image.complete && image.naturalWidth > 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const handleLoad = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("sprite load failed"));
+    };
+    const cleanup = () => {
+      image.removeEventListener("load", handleLoad);
+      image.removeEventListener("error", handleError);
+    };
+
+    image.addEventListener("load", handleLoad);
+    image.addEventListener("error", handleError);
+  });
 }
 
 function createAlphaCanvas(width = 1, height = 1) {
