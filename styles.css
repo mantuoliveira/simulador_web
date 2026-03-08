@@ -204,20 +204,17 @@ body {
 
 .comp-btn {
   flex: 0 0 auto;
-  width: 92px;
+  width: 84px;
   min-height: 56px;
   background: var(--panel-strong);
   border: 1px solid var(--line-strong);
   border-radius: 14px;
-  display: grid;
-  grid-template-rows: 34px auto;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--muted);
   box-shadow: var(--shadow-raised);
-  font-size: 0.74rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 4px 8px;
+  padding: 8px 10px;
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -227,8 +224,8 @@ body {
 }
 
 .comp-btn img {
-  width: 70px;
-  height: 30px;
+  width: 74px;
+  height: 38px;
   object-fit: contain;
 }
 
@@ -541,8 +538,7 @@ button.secondary.danger {
 
 @media (max-width: 420px) {
   .comp-btn {
-    width: 82px;
-    font-size: 0.7rem;
+    width: 76px;
   }
 
   #value-wheel {

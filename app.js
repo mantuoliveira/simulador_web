@@ -840,15 +840,15 @@ function buildComponentStrip() {
     button.className = "comp-btn";
     button.type = "button";
     button.dataset.type = type;
+    button.title = def.label;
+    button.setAttribute("aria-label", def.label);
 
     const img = document.createElement("img");
-    img.alt = def.label;
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
     img.src = svgToDataUri(buildSvgForType(type));
 
-    const span = document.createElement("span");
-    span.textContent = def.label;
-
-    button.append(img, span);
+    button.append(img);
     button.addEventListener("click", () => addComponent(type));
     appEls.strip.appendChild(button);
   }
@@ -3200,45 +3200,53 @@ function findEmptySpot(type) {
   const baseY = clamp(Math.round(center.y), minY, maxY);
 
   const candidate = { id: -1, type, x: baseX, y: baseY, rotation: 0 };
-  if (isComponentPlacementValid(candidate, null, 2)) {
-    return { x: baseX, y: baseY };
-  }
+  const searchPaddingValues = [2, 0];
 
-  const maxRing = Math.max(maxX - minX, maxY - minY);
-  for (let ring = 1; ring <= maxRing; ring += 1) {
-    for (let x = baseX - ring; x <= baseX + ring; x += 1) {
-      if (x < minX || x > maxX) continue;
-
-      const topY = baseY - ring;
-      if (topY >= minY && topY <= maxY) {
-        candidate.x = x;
-        candidate.y = topY;
-        if (isComponentPlacementValid(candidate, null, 2)) return { x, y: topY };
-      }
-
-      const bottomY = baseY + ring;
-      if (bottomY >= minY && bottomY <= maxY) {
-        candidate.x = x;
-        candidate.y = bottomY;
-        if (isComponentPlacementValid(candidate, null, 2)) return { x, y: bottomY };
-      }
+  // Prefer a bit of breathing room on auto-placement, but fall back to the
+  // actual collision rules so valid dense layouts are still insertable.
+  for (const padding of searchPaddingValues) {
+    candidate.x = baseX;
+    candidate.y = baseY;
+    if (isComponentPlacementValid(candidate, null, padding)) {
+      return { x: baseX, y: baseY };
     }
 
-    for (let y = baseY - ring + 1; y <= baseY + ring - 1; y += 1) {
-      if (y < minY || y > maxY) continue;
+    const maxRing = Math.max(maxX - minX, maxY - minY);
+    for (let ring = 1; ring <= maxRing; ring += 1) {
+      for (let x = baseX - ring; x <= baseX + ring; x += 1) {
+        if (x < minX || x > maxX) continue;
 
-      const leftX = baseX - ring;
-      if (leftX >= minX && leftX <= maxX) {
-        candidate.x = leftX;
-        candidate.y = y;
-        if (isComponentPlacementValid(candidate, null, 2)) return { x: leftX, y };
+        const topY = baseY - ring;
+        if (topY >= minY && topY <= maxY) {
+          candidate.x = x;
+          candidate.y = topY;
+          if (isComponentPlacementValid(candidate, null, padding)) return { x, y: topY };
+        }
+
+        const bottomY = baseY + ring;
+        if (bottomY >= minY && bottomY <= maxY) {
+          candidate.x = x;
+          candidate.y = bottomY;
+          if (isComponentPlacementValid(candidate, null, padding)) return { x, y: bottomY };
+        }
       }
 
-      const rightX = baseX + ring;
-      if (rightX >= minX && rightX <= maxX) {
-        candidate.x = rightX;
-        candidate.y = y;
-        if (isComponentPlacementValid(candidate, null, 2)) return { x: rightX, y };
+      for (let y = baseY - ring + 1; y <= baseY + ring - 1; y += 1) {
+        if (y < minY || y > maxY) continue;
+
+        const leftX = baseX - ring;
+        if (leftX >= minX && leftX <= maxX) {
+          candidate.x = leftX;
+          candidate.y = y;
+          if (isComponentPlacementValid(candidate, null, padding)) return { x: leftX, y };
+        }
+
+        const rightX = baseX + ring;
+        if (rightX >= minX && rightX <= maxX) {
+          candidate.x = rightX;
+          candidate.y = y;
+          if (isComponentPlacementValid(candidate, null, padding)) return { x: rightX, y };
+        }
       }
     }
   }
