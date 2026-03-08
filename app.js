@@ -852,6 +852,14 @@ function canToggleNodeMarkerVoltage(nodeMarker) {
   return !!nodeMarker && state.simulationActive && state.simulationResult?.ok;
 }
 
+function getComponentVisibilityToggleMode(component) {
+  if (!component) return null;
+  if (state.simulationActive) {
+    return canToggleCurrentArrow(component) ? "component" : null;
+  }
+  return canToggleComponentValueLabel(component) ? "value" : null;
+}
+
 function setVisibilityToggleButtonState({ mode, hidden }) {
   const label =
     mode === "node"
@@ -892,7 +900,8 @@ function toggleSelectedAnnotationVisibility() {
   }
 
   const component = getComponentById(state.selectedComponentId);
-  if (canToggleComponentValueLabel(component)) {
+  const componentVisibilityMode = getComponentVisibilityToggleMode(component);
+  if (componentVisibilityMode === "value") {
     component.valueLabelHidden = component.valueLabelHidden !== true;
     setVisibilityToggleButtonState({
       mode: "value",
@@ -903,7 +912,7 @@ function toggleSelectedAnnotationVisibility() {
     return;
   }
 
-  if (!canToggleCurrentArrow(component)) return;
+  if (componentVisibilityMode !== "component") return;
 
   component.currentArrowHidden = component.currentArrowHidden !== true;
   setVisibilityToggleButtonState({ mode: "component", hidden: component.currentArrowHidden === true });
@@ -3889,13 +3898,14 @@ function updateSelectionUi() {
     return;
   }
 
-  if (canToggleComponentValueLabel(component)) {
+  const componentVisibilityMode = getComponentVisibilityToggleMode(component);
+  if (componentVisibilityMode === "value") {
     setVisibilityToggleButtonState({
       mode: "value",
       hidden: component.valueLabelHidden === true,
     });
     appEls.currentArrowBtn.classList.remove("hidden");
-  } else if (state.simulationActive && canToggleCurrentArrow(component)) {
+  } else if (componentVisibilityMode === "component") {
     setVisibilityToggleButtonState({
       mode: "component",
       hidden: component.currentArrowHidden === true,
