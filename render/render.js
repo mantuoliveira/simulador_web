@@ -647,26 +647,30 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up", 
 
 function chooseNodeMarkerPlacement(renderTarget, screenPoint, boxW, boxH, preferredDirection = "up", gap = 8) {
   const directions = getNodeMarkerCandidateDirections(preferredDirection);
+  const gapCandidates = getNodeMarkerGapCandidates(gap, boxW, boxH);
   let bestPlacement = null;
   let bestScore = null;
 
   for (let index = 0; index < directions.length; index += 1) {
     const labelDirection = directions[index];
-    const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection, gap);
-    const rect = {
-      x: placement.boxX,
-      y: placement.boxY,
-      width: boxW,
-      height: boxH,
-    };
-    const score = getNodeMarkerPlacementScore(renderTarget, rect, index);
-
-    if (!bestScore || isBetterNodeMarkerPlacementScore(score, bestScore)) {
-      bestPlacement = {
-        ...placement,
-        labelDirection,
+    for (let gapIndex = 0; gapIndex < gapCandidates.length; gapIndex += 1) {
+      const candidateGap = gapCandidates[gapIndex];
+      const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection, candidateGap);
+      const rect = {
+        x: placement.boxX,
+        y: placement.boxY,
+        width: boxW,
+        height: boxH,
       };
-      bestScore = score;
+      const score = getNodeMarkerPlacementScore(renderTarget, rect, index, gapIndex);
+
+      if (!bestScore || isBetterNodeMarkerPlacementScore(score, bestScore)) {
+        bestPlacement = {
+          ...placement,
+          labelDirection,
+        };
+        bestScore = score;
+      }
     }
   }
 
@@ -683,7 +687,19 @@ function getNodeMarkerCandidateDirections(preferredDirection = "up") {
   return [...new Set(ordered.filter(Boolean))];
 }
 
-function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder) {
+function getNodeMarkerGapCandidates(baseGap, boxW, boxH) {
+  return [
+    baseGap,
+    baseGap + clamp(boxH * 0.75, 8, 20),
+    baseGap + clamp(Math.max(boxW, boxH) * 0.45, 18, 40),
+    baseGap + worldLengthToScreen(1),
+    baseGap + worldLengthToScreen(2),
+    baseGap + worldLengthToScreen(3),
+    baseGap + worldLengthToScreen(4),
+  ].filter((gap, index, values) => values.findIndex((value) => Math.abs(value - gap) < 1e-9) === index);
+}
+
+function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder, gapOrder = 0) {
   const collisionRect = expandRect(rect, Math.max(3, Math.max(2.1, state.camera.zoom * 2.4) * 0.5 + 2));
   const preferredClearance = Math.max(10, state.camera.zoom * 10);
   let componentOverlaps = 0;
@@ -732,6 +748,7 @@ function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder) {
     componentProximityPenalty,
     wireProximityPenalty,
     directionOrder,
+    gapOrder,
   };
 }
 
@@ -746,6 +763,10 @@ function isBetterNodeMarkerPlacementScore(candidate, currentBest) {
 
   if (Math.abs(candidate.overflowPenalty - currentBest.overflowPenalty) > 1e-9) {
     return candidate.overflowPenalty < currentBest.overflowPenalty;
+  }
+
+  if (candidate.gapOrder !== currentBest.gapOrder) {
+    return candidate.gapOrder < currentBest.gapOrder;
   }
 
   if (Math.abs(candidate.componentProximityPenalty - currentBest.componentProximityPenalty) > 1e-9) {
