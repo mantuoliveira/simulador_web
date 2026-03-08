@@ -1831,6 +1831,8 @@ function deriveSelectionUiState() {
   const uiState = {
     showThemeToggle: false,
     showEditTerminalLabel: terminalLabelTarget != null,
+    showThermal: false,
+    thermalActive: false,
     showGroupSelect: false,
     groupSelectActive: false,
     showExport: false,
@@ -1859,6 +1861,8 @@ function deriveSelectionUiState() {
     uiState.resetDeleteHold = true;
     uiState.showThemeToggle = true;
     uiState.showEditTerminalLabel = false;
+    uiState.showThermal = state.simulationActive && state.simulationResult?.ok;
+    uiState.thermalActive = state.thermalModeActive === true;
     uiState.showGroupSelect = canExport;
     uiState.showExport = canExport;
     return uiState;
@@ -1935,6 +1939,8 @@ function applySelectionUiState(uiState) {
 
   appEls.themeToggleBtn.classList.toggle("hidden", !uiState.showThemeToggle);
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !uiState.showEditTerminalLabel);
+  appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
+  appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
   appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);
   appEls.groupSelectBtn.classList.toggle("active", !!uiState.groupSelectActive);
   appEls.exportBtn.classList.toggle("hidden", !uiState.showExport);
@@ -1943,6 +1949,12 @@ function applySelectionUiState(uiState) {
   appEls.deleteBtn.classList.toggle("hidden", !uiState.showDelete);
   appEls.swapOpAmpBtn.classList.toggle("hidden", !uiState.showSwap);
   appEls.valueWheel.classList.toggle("hidden", !uiState.showValueWheel);
+  appEls.thermalBtn.title = uiState.thermalActive ? "Ocultar potência dissipada" : "Mostrar potência dissipada";
+  appEls.thermalBtn.setAttribute(
+    "aria-label",
+    uiState.thermalActive ? "Ocultar potência dissipada" : "Mostrar potência dissipada"
+  );
+  appEls.thermalBtn.setAttribute("aria-pressed", uiState.thermalActive ? "true" : "false");
   appEls.groupSelectBtn.title = uiState.groupSelectActive ? "Sair da seleção em grupo" : "Selecionar varios";
   appEls.groupSelectBtn.setAttribute(
     "aria-label",

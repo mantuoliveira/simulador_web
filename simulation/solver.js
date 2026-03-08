@@ -219,6 +219,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   }
 
   const componentCurrents = new Map();
+  const componentPowers = new Map();
 
   for (const component of activeComponents) {
     const r0 = rootByTerminal.get(terminalKey(component.id, 0));
@@ -227,7 +228,9 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     const v1 = nodeVoltageByRoot.get(r1) ?? 0;
 
     if (component.type === "resistor") {
-      componentCurrents.set(component.id, (v0 - v1) / safeResistance(component.value));
+      const current = (v0 - v1) / safeResistance(component.value);
+      componentCurrents.set(component.id, current);
+      componentPowers.set(component.id, safeResistance(component.value) * current * current);
     } else if (component.type === "current_source") {
       componentCurrents.set(component.id, component.value || 0);
     } else if (component.type === "diode") {
@@ -292,6 +295,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const data = {
     nodeVoltages: nodeVoltageByRoot,
     componentCurrents,
+    componentPowers,
     nodeMarkers,
     rootByTerminal,
     solutionVector: solution.slice(),

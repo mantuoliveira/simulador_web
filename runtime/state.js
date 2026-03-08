@@ -19,6 +19,7 @@ const state = {
   groupSelectMode: false,
   simulationActive: false,
   simulationResult: null,
+  thermalModeActive: false,
   hiddenNodeMarkerRoots: new Set(),
   defaultHiddenNodeMarkerRoots: new Set(),
   preferredComponentRotations: new Map(),
@@ -75,6 +76,7 @@ function clearSelectionState(circuit = state) {
 function clearSimulationState(circuit = state) {
   circuit.simulationActive = false;
   circuit.simulationResult = null;
+  circuit.thermalModeActive = false;
 
   if (circuit.hiddenNodeMarkerRoots instanceof Set) {
     circuit.hiddenNodeMarkerRoots.clear();
@@ -93,6 +95,7 @@ const appEls = {
   simulateBtn: document.getElementById("simulate-btn"),
   themeToggleBtn: document.getElementById("theme-toggle-btn"),
   editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
+  thermalBtn: document.getElementById("thermal-btn"),
   groupSelectBtn: document.getElementById("group-select-btn"),
   exportBtn: document.getElementById("export-btn"),
   currentArrowBtn: document.getElementById("current-arrow-btn"),

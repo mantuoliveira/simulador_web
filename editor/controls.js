@@ -78,6 +78,15 @@ function setupButtons() {
     toggleGroupSelectionMode();
   });
 
+  appEls.thermalBtn.addEventListener("click", () => {
+    if (!state.simulationActive || !state.simulationResult?.ok) return;
+
+    state.thermalModeActive = state.thermalModeActive !== true;
+    updateSelectionUi();
+    requestRender(true);
+    showStatus(state.thermalModeActive ? "Potência dissipada visível" : "Potência dissipada oculta");
+  });
+
   appEls.simulateBtn.addEventListener("click", () => {
     if (!state.simulationActive) {
       const autoGround = ensureGroundForSimulation();

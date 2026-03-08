@@ -18,6 +18,7 @@ import {
   degToRad,
   distanceToSegment,
   formatCurrent,
+  formatPower,
   formatVoltage,
   roundedRect,
 } from "../core/support.js";
@@ -321,7 +322,7 @@ function drawComponents(renderTarget, showSelection = true) {
     if (def.editable && def.showValueLabel !== false && component.valueLabelHidden !== true) {
       const labelPoint = getValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
-      const valueText = formatComponentValue(component);
+      const valueText = getComponentCanvasValueText(component);
       context.font = `${Math.max(13, 13 * state.camera.zoom)}px "Avenir Next", sans-serif`;
       context.fillStyle = palette.canvasLabel;
       context.textAlign = "center";
@@ -348,6 +349,17 @@ function drawComponentSelectionOutline(renderTarget, component) {
   context.strokeStyle = palette.canvasSelection;
   context.lineWidth = 2;
   context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
+}
+
+function getComponentCanvasValueText(component) {
+  if (component.type === "resistor" && state.thermalModeActive && state.simulationResult?.ok) {
+    const power = state.simulationResult.data.componentPowers?.get(component.id);
+    if (power != null) {
+      return formatPower(power);
+    }
+  }
+
+  return formatComponentValue(component);
 }
 
 function drawComponentTerminalLabels(renderTarget, component) {

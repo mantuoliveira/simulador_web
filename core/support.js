@@ -276,6 +276,10 @@ function formatCurrent(value) {
   return formatEngineeringValue(value, "A");
 }
 
+function formatPower(value) {
+  return formatEngineeringValue(value, "W");
+}
+
 function roundedRect(context, x, y, width, height, radius) {
   const r = Math.min(radius, width * 0.5, height * 0.5);
   context.beginPath();
@@ -531,6 +535,7 @@ export {
   formatVoltage,
   formatSymmetricVoltage,
   formatCurrent,
+  formatPower,
   roundedRect,
   svgToDataUri,
   buildOpAmpMarkerSvg,
