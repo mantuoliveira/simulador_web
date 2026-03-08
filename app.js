@@ -747,6 +747,47 @@ function componentsOverlap(a, b, padding = 0) {
   );
 }
 
+function getComponentBodyBounds(component) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def) {
+    return {
+      left: component.x,
+      right: component.x,
+      top: component.y,
+      bottom: component.y,
+    };
+  }
+
+  const offsetY = def.bodyOffsetY || 0;
+  const corners = [
+    rotateOffset(-def.bodyHalfW, -def.bodyHalfH + offsetY, component.rotation),
+    rotateOffset(def.bodyHalfW, -def.bodyHalfH + offsetY, component.rotation),
+    rotateOffset(def.bodyHalfW, def.bodyHalfH + offsetY, component.rotation),
+    rotateOffset(-def.bodyHalfW, def.bodyHalfH + offsetY, component.rotation),
+  ];
+
+  const xs = corners.map((corner) => component.x + corner.x);
+  const ys = corners.map((corner) => component.y + corner.y);
+  return {
+    left: Math.min(...xs),
+    right: Math.max(...xs),
+    top: Math.min(...ys),
+    bottom: Math.max(...ys),
+  };
+}
+
+function componentsBodiesOverlap(a, b, padding = 0) {
+  const bodyA = getComponentBodyBounds(a);
+  const bodyB = getComponentBodyBounds(b);
+
+  return (
+    bodyA.left < bodyB.right + padding &&
+    bodyA.right + padding > bodyB.left &&
+    bodyA.top < bodyB.bottom + padding &&
+    bodyA.bottom + padding > bodyB.top
+  );
+}
+
 function findAutoContactCandidateForTargetsInCircuit(circuit, movingComponentId, targetComponents) {
   const movingComponent = getComponentByIdFromCollection(circuit.components, movingComponentId);
   if (!movingComponent) return null;
@@ -763,6 +804,10 @@ function findAutoContactCandidateForTargetsInCircuit(circuit, movingComponentId,
   const matchKeys = new Set();
 
   for (const targetComponent of overlappingComponents) {
+    if (componentsBodiesOverlap(movingComponent, targetComponent, 0)) {
+      return null;
+    }
+
     const targetDef = COMPONENT_DEFS[targetComponent.type];
     let matchedTarget = false;
 
