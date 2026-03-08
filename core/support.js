@@ -1,3 +1,13 @@
+import {
+  COMPONENT_DEFS,
+  MAX_BJT_SATURATION_ARG,
+  MAX_DIODE_EXP_ARG,
+  MAX_OP_AMP_TANH_ARG,
+  OP_AMP_MIN_SUPPLY,
+  OP_AMP_OPEN_LOOP_GAIN,
+  THEME_PALETTE_DEFAULTS,
+} from "./constants.js";
+
 // Shared math, formatting, SVG, and solver support utilities.
 
 function clamp(value, min, max) {
@@ -204,10 +214,6 @@ function getPointProjectionSideSign(point, midX, midY, normalX, normalY) {
   if (!point) return 1;
   const projection = (point.x - midX) * normalX + (point.y - midY) * normalY;
   return projection >= 0 ? -1 : 1;
-}
-
-function formatComponentValue(component) {
-  return getComponentBehavior(component.type).formatValue(component);
 }
 
 function multiplyMatrixVector(matrix, vector) {
@@ -453,10 +459,6 @@ function buildGroundSvg(options = {}) {
   return buildDefaultComponentSvg(options);
 }
 
-function buildSvgForType(type, options = {}) {
-  return getComponentBehavior(type).buildSvg(options);
-}
-
 class DisjointSet {
   constructor(items) {
     this.parent = new Map();
@@ -502,3 +504,47 @@ class DisjointSet {
     }
   }
 }
+
+export {
+  clamp,
+  roundTo,
+  snapToStep,
+  safeResistance,
+  safeOpAmpSupply,
+  safeBjtBeta,
+  evaluateJunctionModel,
+  evaluateDiodeModel,
+  evaluateForwardOnlyJunctionModel,
+  evaluateBjtSaturationFactor,
+  evaluateBjtCoreModel,
+  evaluateBjtModel,
+  evaluateOpAmpModel,
+  normalizeRotation,
+  degToRad,
+  distance,
+  distanceToSegment,
+  getPointProjectionSideSign,
+  multiplyMatrixVector,
+  maxAbsValue,
+  formatResistance,
+  formatEngineeringValue,
+  formatVoltage,
+  formatSymmetricVoltage,
+  formatCurrent,
+  roundedRect,
+  svgToDataUri,
+  buildOpAmpMarkerSvg,
+  getSpriteThemeColors,
+  buildDefaultComponentSvg,
+  buildResistorSvg,
+  buildVoltageSourceSvg,
+  buildCurrentSourceSvg,
+  buildVoltageNodeSvg,
+  buildOpAmpSvg,
+  buildDiodeSvg,
+  buildBjtSvg,
+  buildBjtNpnSvg,
+  buildBjtPnpSvg,
+  buildGroundSvg,
+  DisjointSet,
+};

@@ -1,3 +1,44 @@
+import {
+  COMPONENT_DEFS,
+  DOUBLE_TAP_MAX_DELAY_MS,
+  DOUBLE_TAP_MAX_DISTANCE_PX,
+  EMPTY_TAP_MOVE_TOLERANCE_PX,
+  GRID_SIZE,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  MOUSE_TERMINAL_HIT_RADIUS,
+  TOUCH_TERMINAL_HIT_RADIUS,
+} from "../core/constants.js";
+import { clamp, distance } from "../core/support.js";
+import { appEls, emptyCanvasTapState, state, wheelState } from "../runtime/state.js";
+import { requestRender } from "../render/render.js";
+import {
+  clearSelection,
+  clientToCanvas,
+  clientToWorld,
+  getComponentById,
+  handleTerminalTap,
+  handleWireTap,
+  isComponentGroupSelected,
+  normalizedFromValue,
+  pickComponentBody,
+  pickNodeMarker,
+  pickTerminal,
+  pickTerminalLabel,
+  pickWire,
+  screenToWorld,
+  selectComponent,
+  selectNodeMarker,
+  selectTerminalLabel,
+  selectWire,
+  toggleComponentInGroupSelection,
+  tryMoveComponent,
+  tryMoveSelectedComponents,
+  updateSelectionUi,
+  updateValueFromWheelPointer,
+  worldToScreen,
+} from "./circuit.js";
+
 // Pointer, touch, zoom, and wheel interaction handlers.
 
 function setupCanvasGestures() {
@@ -649,3 +690,28 @@ function findTouchById(touchList, id) {
   }
   return null;
 }
+
+export {
+  setupCanvasGestures,
+  setupWheelGestures,
+  setupNativeZoomGuards,
+  finishPointerInteraction,
+  pickGroupSelectableComponent,
+  startGroupPressSelection,
+  moveGroupPress,
+  finishGroupPressSelection,
+  startSingleTouch,
+  moveDrag,
+  startPan,
+  movePan,
+  startMousePan,
+  moveMousePan,
+  startPinch,
+  movePinch,
+  zoomAroundPoint,
+  resetZoomToDefaultAtPoint,
+  clearEmptyCanvasTapHistory,
+  registerEmptyCanvasTap,
+  isCanvasPointEmpty,
+  findTouchById,
+};

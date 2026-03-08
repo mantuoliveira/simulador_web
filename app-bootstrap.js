@@ -1,11 +1,3 @@
-buildComponentStrip();
-applyThemeMode(themeState.mode);
-setupCanvas();
-setupButtons();
-setupKeyboardShortcuts();
-setupCanvasGestures();
-setupWheelGestures();
-setupNativeZoomGuards();
-setupServiceWorker();
-setupRenderLoop();
-updateSelectionUi();
+import { bootstrapApp } from "./bootstrap/bootstrap.js";
+
+bootstrapApp();

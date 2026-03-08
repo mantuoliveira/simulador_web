@@ -1,3 +1,59 @@
+import {
+  BJT_COLLECTOR_TERMINAL_INDEX,
+  BJT_EMITTER_TERMINAL_INDEX,
+  COMPONENT_DEFS,
+  GRID_SIZE,
+  OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
+  OP_AMP_TOP_INPUT_TERMINAL_INDEX,
+  isGroundReferencedVoltageSourceComponent,
+} from "../core/constants.js";
+import {
+  clamp,
+  degToRad,
+  distanceToSegment,
+  normalizeRotation,
+} from "../core/support.js";
+import {
+  formatComponentValue,
+  getComponentBehavior,
+  getDefaultComponentRotation,
+  rememberComponentRotation,
+} from "../core/behaviors.js";
+import {
+  appEls,
+  clearNonComponentSelection,
+  clearNodeMarkerSelection,
+  clearSelectionState,
+  clearSimulationState,
+  deleteButtonHoldState,
+  mainRenderTarget,
+  state,
+  terminalLabelEditorState,
+  wheelState,
+} from "../runtime/state.js";
+import {
+  getNodeMarkerRenderMetrics,
+  getTerminalLabelRenderMetrics,
+  requestRender,
+} from "../render/render.js";
+import {
+  routeWire,
+  routeWireInCircuit,
+  clonePath,
+  clonePoint,
+  sameGridPoint,
+  simplifyOrthogonalPath,
+} from "./routing.js";
+import {
+  canToggleNodeMarkerVoltage,
+  clearDeleteButtonHold,
+  getComponentVisibilityToggleMode,
+  setSimulationButtonState,
+  setVisibilityToggleButtonState,
+  showStatus,
+} from "./ui.js";
+import { buildStoredSimulationResult, runSimulation } from "../simulation/solver.js";
+
 // Circuit editing, selection state, topology changes, and shared runtime helpers.
 
 function handleTerminalTap(componentId, terminalIndex) {
@@ -2240,18 +2296,6 @@ function onCircuitChanged() {
   requestRender(true);
 }
 
-function showStatus(text, isError = false) {
-  appEls.status.textContent = text;
-  appEls.status.style.background = isError ? themePalette.statusErrorBg : themePalette.statusBg;
-  appEls.status.style.color = isError ? themePalette.statusErrorInk : themePalette.statusInk;
-  appEls.status.classList.add("show");
-
-  clearTimeout(statusTimer);
-  statusTimer = setTimeout(() => {
-    appEls.status.classList.remove("show");
-  }, 1700);
-}
-
 function worldToScreen(worldX, worldY) {
   return {
     x: worldX * GRID_SIZE * state.camera.zoom + state.camera.offsetX,
@@ -2373,3 +2417,143 @@ function oppositeDirection(direction) {
 function manhattan(a, b) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
+
+export {
+  handleTerminalTap,
+  isIntraComponentConnectionAllowed,
+  handleWireTap,
+  hasDirectWireBetween,
+  addComponent,
+  addComponentToCircuit,
+  buildJunctionComponent,
+  buildJunctionComponentForCircuit,
+  buildSplitWires,
+  buildSplitWiresForCircuit,
+  replaceWireWithTap,
+  replaceWireWithTapInCircuit,
+  splitWirePathAtPoint,
+  getWireEndpointAtPoint,
+  findEmptySpot,
+  snapshotWireStates,
+  restoreWireStates,
+  tryMoveComponent,
+  getWiresForComponentIdsFromCollection,
+  restoreComponentPositions,
+  rollbackGroupMoveInCircuit,
+  tryMoveSelectedComponents,
+  moveSelectedComponentsInCircuit,
+  moveComponentInCircuit,
+  rotateComponentInCircuit,
+  toggleComponentTerminalOrderInCircuit,
+  isComponentPlacementValidForComponents,
+  isComponentPlacementValid,
+  componentsOverlap,
+  getComponentBodyBounds,
+  getComponentRenderBounds,
+  componentsRenderBoundsOverlap,
+  componentsBodiesOverlap,
+  findAutoContactCandidateForTargetsInCircuit,
+  findAutoContactCandidateInCircuit,
+  findDirectWireBetweenInCircuit,
+  wireConnectsTerminalRefs,
+  syncImplicitContactWiresInCircuit,
+  buildImplicitContactWireInCircuit,
+  getWireTerminalPositionsForComponents,
+  getFootprintExtents,
+  rerouteConnectedWiresInCircuit,
+  rerouteConnectedWires,
+  isWireVisible,
+  getWiresForComponentFromCollection,
+  getWiresForComponent,
+  pickTerminal,
+  pickComponentBody,
+  pickWire,
+  pickTerminalLabel,
+  pickNodeMarker,
+  snapPointToSegment,
+  pointOnOrthogonalSegment,
+  cloneTerminalRef,
+  pointInsideComponentBody,
+  worldToLocal,
+  isComponentGroupSelected,
+  toggleComponentInGroupSelection,
+  setGroupSelectionMode,
+  toggleGroupSelectionMode,
+  selectComponent,
+  selectWire,
+  selectTerminalLabel,
+  selectNodeMarker,
+  clearSelection,
+  removeComponent,
+  removeWire,
+  removeTerminalLabel,
+  collectWireCleanupTargets,
+  collectWireCleanupTargetsForCircuit,
+  cleanupAutoJunctions,
+  cleanupAutoJunctionsInCircuit,
+  removeJunctionComponent,
+  removeJunctionComponentFromCircuit,
+  tryMergeSplitJunction,
+  tryMergeSplitJunctionInCircuit,
+  removeComponentFromCircuit,
+  removeWireFromCircuit,
+  clearInvalidSelectionsInCircuit,
+  areMergeableSplitPair,
+  terminalRefsEqual,
+  isSimulatedBranchComponent,
+  getReachabilityTerminalPairs,
+  getSelectedNodeMarker,
+  getNodeMarkerRootForTerminal,
+  syncSelectedNodeMarkerWithTerminal,
+  applyDefaultGroundNodeMarkerVisibility,
+  deriveSelectionUiState,
+  applySelectionUiState,
+  updateSelectionUi,
+  syncWheelWithSelectedComponent,
+  updateValueFromWheelPointer,
+  getWheelNormalizedAtClientPoint,
+  valueFromNormalized,
+  normalizedFromValue,
+  quantizeResistor,
+  getComponentByIdFromCollection,
+  getWireByIdFromCollection,
+  getTerminalPositionForComponents,
+  getTerminalPosition,
+  getTerminalLabelDirectionForComponents,
+  getTerminalLabelDirection,
+  buildRouteTerminalOptionsForComponents,
+  buildRouteTerminalOptions,
+  getOpAmpInputTerminalIndices,
+  getBjtCollectorEmitterTerminalIndices,
+  isTerminalConnected,
+  getComponentById,
+  getWireById,
+  getTerminalLabel,
+  getTerminalLabelEditorTarget,
+  setTerminalLabel,
+  openTerminalLabelEditor,
+  closeTerminalLabelEditor,
+  saveTerminalLabelFromEditor,
+  getCardinalValueLabelAnchor,
+  getReverseCardinalValueLabelAnchor,
+  getValueLabelAnchor,
+  onCircuitChanged,
+  showStatus,
+  worldToScreen,
+  getVisibleWorldBounds,
+  clientToCanvas,
+  clientToWorld,
+  screenToWorld,
+  worldLengthToScreen,
+  rotateOffset,
+  terminalKey,
+  parseTerminalKey,
+  key,
+  edgeKey,
+  pathStateKey,
+  parsePathStateKey,
+  parseKey,
+  stepDirection,
+  oppositeDirection,
+  manhattan,
+};

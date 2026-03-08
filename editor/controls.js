@@ -1,3 +1,60 @@
+import {
+  COMPONENT_DEFS,
+  DARK_THEME,
+  DELETE_BUTTON_HOLD_MS,
+  EXPORT_BUTTON_HOLD_MS,
+  LIGHT_THEME,
+  isGroundReferencedVoltageSourceComponent,
+} from "../core/constants.js";
+import { getFootprintExtents } from "../core/model.js";
+import {
+  appEls,
+  clearSelectionState,
+  clearSimulationState,
+  deleteButtonHoldState,
+  exportButtonHoldState,
+  state,
+  themeState,
+} from "../runtime/state.js";
+import { applyThemeMode, updateThemeToggleButtonState } from "../runtime/ui.js";
+import { requestRender } from "../render/render.js";
+import { handleExportAction } from "../export/png.js";
+import { buildStoredSimulationResult, runSimulation } from "../simulation/solver.js";
+import { getSelectedNodeMarker, getTerminalPosition } from "./selectors.js";
+import { getVisibleWorldBounds } from "../runtime/viewport.js";
+import {
+  applyDefaultGroundNodeMarkerVisibility,
+  closeTerminalLabelEditor,
+  findEmptySpot,
+  getComponentById,
+  getTerminalLabelEditorTarget,
+  isComponentPlacementValid,
+  onCircuitChanged,
+  openTerminalLabelEditor,
+  removeComponent,
+  removeTerminalLabel,
+  removeWire,
+  rotateComponentInCircuit,
+  saveTerminalLabelFromEditor,
+  terminalKey,
+  terminalRefsEqual,
+  toggleComponentTerminalOrderInCircuit,
+  toggleGroupSelectionMode,
+  updateSelectionUi,
+} from "./circuit.js";
+import { buildRouteTerminalOptions } from "./circuit.js";
+import { routeWire } from "./routing.js";
+import {
+  canToggleComponentValueLabel,
+  canToggleCurrentArrow,
+  canToggleNodeMarkerVoltage,
+  clearDeleteButtonHold,
+  getComponentVisibilityToggleMode,
+  setSimulationButtonState,
+  setVisibilityToggleButtonState,
+  showStatus,
+} from "./ui.js";
+
 // Top-level UI controls, editor actions, and keyboard shortcuts.
 
 function setupButtons() {
@@ -103,57 +160,6 @@ function clearCircuit() {
   showStatus("Canvas limpo");
 }
 
-function setSimulationButtonState(isRunning) {
-  appEls.simulateBtn.innerHTML = isRunning ? SIMULATION_BUTTON_ICONS.running : SIMULATION_BUTTON_ICONS.idle;
-  appEls.simulateBtn.classList.toggle("running", isRunning);
-  appEls.simulateBtn.title = isRunning ? "Pausar simulacao" : "Iniciar simulacao";
-  appEls.simulateBtn.setAttribute("aria-label", isRunning ? "Pausar simulacao" : "Iniciar simulacao");
-  appEls.simulateBtn.setAttribute("aria-pressed", isRunning ? "true" : "false");
-}
-
-function canToggleCurrentArrow(component) {
-  return !!component && getComponentBehavior(component.type).supportsCurrentArrow === true;
-}
-
-function canToggleComponentValueLabel(component) {
-  if (!component) return false;
-  const def = COMPONENT_DEFS[component.type];
-  return !!def && def.editable === true && def.showValueLabel !== false;
-}
-
-function canToggleNodeMarkerVoltage(nodeMarker) {
-  return !!nodeMarker && state.simulationActive && state.simulationResult?.ok;
-}
-
-function getComponentVisibilityToggleMode(component) {
-  if (!component) return null;
-  if (state.simulationActive) {
-    return canToggleCurrentArrow(component) ? "component" : null;
-  }
-  return canToggleComponentValueLabel(component) ? "value" : null;
-}
-
-function setVisibilityToggleButtonState({ mode, hidden }) {
-  const label =
-    mode === "node"
-      ? hidden
-        ? "Mostrar tensão do nó"
-        : "Ocultar tensão do nó"
-      : mode === "value"
-        ? hidden
-          ? "Mostrar valor do componente"
-          : "Ocultar valor do componente"
-      : hidden
-        ? "Mostrar seta de corrente"
-        : "Ocultar seta de corrente";
-  appEls.currentArrowBtn.innerHTML = hidden
-    ? CURRENT_ARROW_BUTTON_ICONS.hidden
-    : CURRENT_ARROW_BUTTON_ICONS.visible;
-  appEls.currentArrowBtn.title = label;
-  appEls.currentArrowBtn.setAttribute("aria-label", label);
-  appEls.currentArrowBtn.setAttribute("aria-pressed", hidden ? "true" : "false");
-}
-
 function toggleSelectedAnnotationVisibility() {
   const nodeMarker = getSelectedNodeMarker();
   if (canToggleNodeMarkerVoltage(nodeMarker)) {
@@ -228,13 +234,6 @@ function setupDeleteButtonGestures() {
   appEls.deleteBtn.addEventListener("pointerup", clearDeleteButtonHold);
   appEls.deleteBtn.addEventListener("pointerleave", clearDeleteButtonHold);
   appEls.deleteBtn.addEventListener("pointercancel", clearDeleteButtonHold);
-}
-
-function clearDeleteButtonHold() {
-  if (deleteButtonHoldState.timerId == null) return;
-
-  clearTimeout(deleteButtonHoldState.timerId);
-  deleteButtonHoldState.timerId = null;
 }
 
 function setupExportButtonGestures() {
@@ -500,3 +499,28 @@ function isEditableTarget(target) {
   const tagName = typeof target.tagName === "string" ? target.tagName.toUpperCase() : "";
   return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
 }
+
+export {
+  setupButtons,
+  setupTerminalLabelModal,
+  clearCircuit,
+  setSimulationButtonState,
+  canToggleCurrentArrow,
+  canToggleComponentValueLabel,
+  canToggleNodeMarkerVoltage,
+  getComponentVisibilityToggleMode,
+  setVisibilityToggleButtonState,
+  toggleSelectedAnnotationVisibility,
+  setupDeleteButtonGestures,
+  clearDeleteButtonHold,
+  setupExportButtonGestures,
+  clearExportButtonHold,
+  toggleSelectedComponentTerminalOrder,
+  ensureGroundForSimulation,
+  collectAutoGroundTargets,
+  tryInsertAutoGround,
+  buildAutoGroundCandidates,
+  setupKeyboardShortcuts,
+  handleDeleteAction,
+  isEditableTarget,
+};

@@ -1,3 +1,23 @@
+import {
+  COMPONENT_DEFS,
+  NODE_PROXIMITY_PENALTY,
+  OCCUPIED_WIRE_EDGE_PENALTY,
+  TERMINAL_DIRECTION_MISMATCH_PENALTY,
+  TURN_PENALTY,
+} from "../core/constants.js";
+import { state } from "../runtime/state.js";
+import {
+  edgeKey,
+  getFootprintExtents,
+  getTerminalPositionForComponents,
+  key,
+  manhattan,
+  parsePathStateKey,
+  pathStateKey,
+  rotateOffset,
+  stepDirection,
+} from "../core/model.js";
+
 const ORTHOGONAL_NEIGHBOR_STEPS = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
@@ -330,3 +350,30 @@ function clonePoint(point) {
 function clonePath(path) {
   return path.map(clonePoint);
 }
+
+export {
+  ORTHOGONAL_NEIGHBOR_STEPS,
+  COMPONENT_ROUTE_MARGIN,
+  ROUTE_BOUNDS_PADDING,
+  routeWireInCircuit,
+  routeWire,
+  routeBoundsForComponents,
+  routeBounds,
+  findPathAStar,
+  buildBlockedCellSetForComponents,
+  findLowestScoreStateKey,
+  getOrthogonalNeighbors,
+  isPointWithinRouteBounds,
+  computePathTransitionCost,
+  buildOccupiedWireEdgeSetForWires,
+  addLinearOccupiedEdges,
+  buildOccupiedWireEdgeSet,
+  buildTerminalProximitySetForComponents,
+  buildTerminalProximitySet,
+  rebuildPath,
+  simplifyOrthogonalPath,
+  getObstacleCells,
+  sameGridPoint,
+  clonePoint,
+  clonePath,
+};

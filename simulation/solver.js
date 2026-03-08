@@ -1,3 +1,45 @@
+import {
+  BJT_BASE_TERMINAL_INDEX,
+  COMPONENT_DEFS,
+  MAX_BJT_JUNCTION_VOLTAGE_STEP,
+  MAX_DIODE_VOLTAGE_STEP,
+  NEWTON_BACKTRACK_STEPS,
+  NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE,
+  NEWTON_KCL_RESIDUAL_TOLERANCE,
+  NEWTON_MAX_ITERATIONS,
+  NEWTON_SOURCE_STEPS,
+  NEWTON_STEP_TOLERANCE,
+  OP_AMP_OUTPUT_TERMINAL_INDEX,
+  isBjtComponentType,
+  isGroundReferencedVoltageSourceComponent,
+  isIdealVoltageSourceComponent,
+} from "../core/constants.js";
+import {
+  DisjointSet,
+  clamp,
+  evaluateBjtModel,
+  evaluateDiodeModel,
+  evaluateOpAmpModel,
+  maxAbsValue,
+  multiplyMatrixVector,
+  safeResistance,
+} from "../core/support.js";
+import { state } from "../runtime/state.js";
+import {
+  getBjtCollectorEmitterTerminalIndices,
+  getOpAmpInputTerminalIndices,
+  getTerminalLabelDirectionForComponents,
+  getTerminalPositionForComponents,
+  key,
+  parseTerminalKey,
+  terminalKey,
+  clonePoint,
+} from "../core/model.js";
+import {
+  getReachabilityTerminalPairs,
+  isSimulatedBranchComponent,
+} from "../core/behaviors.js";
+
 const IMPLICIT_GROUND_ROOT = "__implicit_ground__";
 
 function simulateCircuit({ components, wires, previousSolution = null }) {
@@ -1039,3 +1081,32 @@ function solveLinearSystem(matrix, vector) {
 
   return x;
 }
+
+export {
+  IMPLICIT_GROUND_ROOT,
+  simulateCircuit,
+  buildStoredSimulationResult,
+  runSimulation,
+  getComponentTerminalRoots,
+  pushNodeMarkerGroupPoint,
+  dedupeMarkerPoints,
+  chooseNodeMarkerAnchor,
+  distanceSquared,
+  isBetterMarkerTieBreak,
+  chooseNodeMarkerLabelDirection,
+  buildLinearMnaSystem,
+  solveNonlinearCircuit,
+  runNewtonIterations,
+  evaluateNonlinearSystem,
+  evaluateResidualNorm,
+  evaluateResidualMetrics,
+  residualMetricsToScore,
+  isResidualConverged,
+  isResidualCloseEnough,
+  stampConductance,
+  limitCandidateJunctionVoltages,
+  getBranchVoltage,
+  limitBranchVoltageStep,
+  stampBjtResidualAndJacobian,
+  solveLinearSystem,
+};

@@ -1,8 +1,22 @@
+import { THEME_PALETTE_DEFAULTS } from "../core/constants.js";
+import {
+  appEls,
+  createRenderTarget,
+  resizeRenderTarget,
+  state,
+} from "../runtime/state.js";
+import { createSpriteMap } from "../runtime/ui.js";
+import { drawScene } from "../render/render.js";
+import { showStatus } from "../editor/ui.js";
+
 const EXPORT_FILENAME_PREFIX = "circuito";
 const EXPORT_TRIM_PADDING_PX = 12;
 const EXPORT_SCALE = 3;
-const EXPORT_THEME_PALETTE = { ...THEME_PALETTE_DEFAULTS };
 let exportLightSpriteMapPromise = null;
+
+function getExportThemePalette() {
+  return { ...THEME_PALETTE_DEFAULTS };
+}
 
 async function handleExportAction({ background = "white" } = {}) {
   if (state.components.length === 0) {
@@ -35,6 +49,7 @@ async function exportCircuitBlob({ background = "white" } = {}) {
   const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
   const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
   const exportDpr = Math.max(1, EXPORT_SCALE);
+  const exportThemePalette = getExportThemePalette();
   const exportSpriteMap = await getExportLightSpriteMap();
   const exportCanvas = createAlphaCanvas();
   const exportRenderTarget = createRenderTarget(exportCanvas, {
@@ -50,7 +65,7 @@ async function exportCircuitBlob({ background = "white" } = {}) {
       showGrid: false,
       showSelection: false,
       showPendingTerminal: false,
-      themePalette: EXPORT_THEME_PALETTE,
+      themePalette: exportThemePalette,
       spriteMap: exportSpriteMap,
     },
     exportRenderTarget
@@ -74,7 +89,7 @@ function getExportLightSpriteMap() {
 }
 
 async function buildExportLightSpriteMap() {
-  const sprites = createSpriteMap({ palette: EXPORT_THEME_PALETTE }, { notifyOnLoad: false });
+  const sprites = createSpriteMap({ palette: getExportThemePalette() }, { notifyOnLoad: false });
   await Promise.all(Object.values(sprites).map(waitForImageLoad));
   return sprites;
 }
@@ -244,3 +259,20 @@ function trimCanvas(sourceCanvas, paddingPx = 0) {
 
   return trimmedCanvas;
 }
+
+export {
+  EXPORT_FILENAME_PREFIX,
+  EXPORT_TRIM_PADDING_PX,
+  EXPORT_SCALE,
+  handleExportAction,
+  exportCircuitBlob,
+  getExportThemePalette,
+  getExportLightSpriteMap,
+  waitForImageLoad,
+  createAlphaCanvas,
+  canvasToBlob,
+  downloadBlob,
+  buildExportFileName,
+  applyCanvasBackground,
+  trimCanvas,
+};

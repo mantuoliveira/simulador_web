@@ -1,3 +1,47 @@
+import {
+  BJT_BASE_TERMINAL_INDEX,
+  COMPONENT_DEFS,
+  IDLE_FRAME_MS,
+} from "../core/constants.js";
+import {
+  formatComponentValue,
+  getComponentBehavior,
+  getCurrentArrowTerminalPair,
+  getValueLabelAnchor,
+} from "../core/behaviors.js";
+import { getOpAmpInputTerminalIndices } from "../core/model.js";
+import {
+  clamp,
+  degToRad,
+  distanceToSegment,
+  formatCurrent,
+  formatVoltage,
+  roundedRect,
+} from "../core/support.js";
+import {
+  mainRenderTarget,
+  renderState,
+  spriteMap,
+  state,
+  themePalette,
+  wheelState,
+  getRenderSpriteMap,
+  getRenderThemePalette,
+} from "../runtime/state.js";
+import {
+  getTerminalLabel,
+  getTerminalLabelDirection,
+  getTerminalPosition,
+  isComponentGroupSelected,
+  isTerminalConnected,
+  isWireVisible,
+} from "../editor/selectors.js";
+import {
+  screenToWorld,
+  worldLengthToScreen,
+  worldToScreen,
+} from "../runtime/viewport.js";
+
 // Canvas rendering, theme-driven sprite handling, and service worker/render loop setup.
 
 function setupServiceWorker() {
@@ -217,7 +261,11 @@ function drawComponents(renderTarget, showSelection = true) {
       context.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
     }
 
-    behavior.drawSpriteOverlay(component, renderTarget);
+    if (behavior.spriteOverlay === "op_amp_inputs") {
+      drawOpAmpInputMarkers(renderTarget, component);
+    } else if (behavior.spriteOverlay === "voltage_source_polarity") {
+      drawVoltageSourcePolarityMarkers(renderTarget, component);
+    }
 
     const isSelected =
       showSelection &&
@@ -438,10 +486,6 @@ function drawSimulationAnnotations(renderTarget, data) {
     if (current == null || component.type === "ground" || component.currentArrowHidden === true) continue;
     drawCurrentArrow(renderTarget, component, current);
   }
-}
-
-function getCurrentArrowTerminalPair(component) {
-  return getComponentBehavior(component.type).getCurrentArrowTerminalPair(component);
 }
 
 function getNodeMarkerRenderMetrics(renderTarget, marker) {
@@ -831,6 +875,7 @@ function drawCurrentArrow(renderTarget, component, current) {
   const normalY = dirX;
   const shaftHalf = 1.05;
   const arrowLayout = behavior.getCurrentArrowLayout(component, {
+    baseTerminalPoint: getTerminalPosition(component.id, BJT_BASE_TERMINAL_INDEX),
     dirX,
     dirY,
     midX,
@@ -917,3 +962,44 @@ function drawCurrentArrow(renderTarget, component, current) {
   context.textBaseline = textBaseline;
   context.fillText(text, textX, textY);
 }
+
+export {
+  setupServiceWorker,
+  setupRenderLoop,
+  isHighFpsInteractionActive,
+  cancelScheduledRender,
+  requestRender,
+  scheduleRender,
+  renderLoop,
+  drawScene,
+  drawGrid,
+  drawWires,
+  drawComponents,
+  getTerminalRenderRadius,
+  drawComponentTerminalLabels,
+  drawOpAmpInputMarkers,
+  drawOpAmpMarkerAt,
+  drawVoltageSourcePolarityMarkers,
+  drawSimulationAnnotations,
+  getCurrentArrowTerminalPair,
+  getNodeMarkerRenderMetrics,
+  getNodeMarkerPlacement,
+  chooseNodeMarkerPlacement,
+  getNodeMarkerCandidateDirections,
+  getNodeMarkerPlacementScore,
+  isBetterNodeMarkerPlacementScore,
+  getRectOverflowPenalty,
+  expandRect,
+  segmentIntersectsRect,
+  pointInRect,
+  segmentsIntersect,
+  orientation,
+  pointOnCollinearSegment,
+  distanceSegmentToRect,
+  distancePointToRect,
+  getTerminalLabelRenderMetrics,
+  parseTerminalLabelText,
+  getTerminalLabelTextLayout,
+  drawTerminalLabelText,
+  drawCurrentArrow,
+};

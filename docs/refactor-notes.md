@@ -4,47 +4,63 @@ This note is a quick map for safe refactors in this browser-only app.
 
 ## Load Order
 
-`index.html` loads scripts in a strict order and they share globals.
+`index.html` loads a single browser entrypoint: `app-bootstrap.js`.
 
-1. `app-core.js`
-2. `app-support.js`
-3. `app-render.js`
-4. `app-runtime.js`
-5. `app-controls.js`
-6. `app-interaction.js`
-7. `app.js`
-8. `app-routing.js`
-9. `app-simulation.js`
-10. `app-export.js`
-11. `app-bootstrap.js`
+The runtime graph is now ESM-driven:
 
-If a symbol moves across files, re-check that every consumer still loads after its definition.
+1. `app-bootstrap.js`
+2. `bootstrap/bootstrap.js`
+3. `core/constants.js`
+4. `core/behaviors.js`
+5. `runtime/state.js`
+6. `runtime/ui.js`
+7. `runtime/viewport.js`
+8. `core/model.js`
+9. `core/support.js`
+10. `render/render.js`
+11. `editor/ui.js`
+12. `editor/selectors.js`
+13. `editor/circuit.js`
+14. `editor/controls.js`
+15. `editor/interactions.js`
+16. `editor/routing.js`
+17. `simulation/solver.js`
+18. `export/png.js`
+
+If a symbol moves across files, re-check the import graph and the service-worker asset list.
 
 ## Runtime Invariants
 
 - `state` is the single mutable runtime store used by editor, renderer, routing, simulation, and export.
 - `appEls` is resolved once from static DOM ids in `index.html`; changing ids requires matching JS updates.
-- `app-bootstrap.js` should stay thin and only orchestrate startup.
-- `app-routing.js`, `app-simulation.js`, and `app-export.js` still depend on globals defined by earlier scripts.
+- `app-bootstrap.js` should stay thin and only delegate to `bootstrap/bootstrap.js`.
+- `editor/interactions.js` may mutate `state.pointer` and `state.camera` directly; other user-visible circuit mutations should stay in `editor/circuit.js` or `editor/controls.js`.
+- `runtime/state.js`, `core/model.js`, `editor/selectors.js`, and `runtime/viewport.js` should stay dependency-light so `render`, `solver`, and `routing` can consume them without cycles.
 - `service-worker.js` must be updated when browser-loaded assets are added, renamed, or removed.
 - Behavior must remain browser-first and dependency-free; do not introduce a build step unless that is an explicit project change.
 
 ## File Ownership
 
-- `app-core.js`: component metadata and domain rules.
-- `app-support.js`: pure helpers, formatting, math, SVG, and shared support code.
-- `app-render.js`: drawing, theme palette, sprites, render scheduling, and service worker registration.
-- `app-runtime.js`: `state`, DOM references, canvas sizing, and startup state holders.
-- `app-controls.js`: button flows, keyboard flows, clear/delete/export controls, and UI actions.
-- `app-interaction.js`: pointer/touch/wheel gestures.
-- `app.js`: selection, circuit mutation, geometry helpers tied to editor state, and integration glue.
-- `app-routing.js`: orthogonal pathfinding.
-- `app-simulation.js`: MNA solver and nonlinear device handling.
-- `app-export.js`: PNG export/share.
+- `core/constants.js`: component metadata and shared constants.
+- `core/behaviors.js`: component-specific behavior, value logic, and SVG builders.
+- `core/model.js`: pure circuit geometry, ids, and component layout helpers.
+- `core/support.js`: pure helpers, formatting, math, SVG, and shared support code.
+- `runtime/state.js`: `state`, DOM references, render targets, and shared runtime holders.
+- `runtime/ui.js`: theme palette, sprite rebuilds, component strip, and canvas sizing.
+- `runtime/viewport.js`: screen/world coordinate transforms.
+- `render/render.js`: drawing, render scheduling, and service worker registration.
+- `editor/ui.js`: status pill and button state helpers.
+- `editor/selectors.js`: read-only selectors over `state`.
+- `editor/circuit.js`: selection, circuit mutation, and editor orchestration.
+- `editor/controls.js`: button flows, keyboard flows, clear/delete/export controls, and UI actions.
+- `editor/interactions.js`: pointer/touch/wheel gestures.
+- `editor/routing.js`: orthogonal pathfinding.
+- `simulation/solver.js`: MNA solver and nonlinear device handling.
+- `export/png.js`: PNG export/share.
 
 ## Safe Refactor Checklist
 
-- Run `node --check` on every browser script after moving code.
+- Start a static server and load `index.html` in a browser after moving modules.
 - Reload the page and confirm the component strip renders.
 - Confirm the canvas initializes and resizes.
 - Test one component insertion, one wire connection, one move, and one rotation.
