@@ -163,6 +163,16 @@ function refreshThemePalette() {
       "--canvas-sprite-fill",
       THEME_PALETTE_DEFAULTS.canvasSpriteFill
     ),
+    canvasThermalResistorWarm: readThemeCssVar(
+      styles,
+      "--canvas-thermal-resistor-warm",
+      THEME_PALETTE_DEFAULTS.canvasThermalResistorWarm
+    ),
+    canvasThermalResistorHot: readThemeCssVar(
+      styles,
+      "--canvas-thermal-resistor-hot",
+      THEME_PALETTE_DEFAULTS.canvasThermalResistorHot
+    ),
   });
 }
 

@@ -2,6 +2,8 @@ import {
   BJT_BASE_TERMINAL_INDEX,
   COMPONENT_DEFS,
   IDLE_FRAME_MS,
+  RESISTOR_THERMAL_BUCKET_COUNT,
+  RESISTOR_THERMAL_RATED_POWER_W,
 } from "../core/constants.js";
 import {
   formatComponentValue,
@@ -20,6 +22,7 @@ import {
   formatCurrent,
   formatPower,
   formatVoltage,
+  mixColors,
   roundedRect,
 } from "../core/support.js";
 import {
@@ -251,18 +254,17 @@ function drawComponents(renderTarget, showSelection = true) {
     context.translate(center.x, center.y);
     context.rotate(degToRad(component.rotation));
     behavior.applySpriteTransform(context, component);
+    const thermalTint = getComponentThermalTint(component, palette);
+    const spriteX = -width / 2 + renderOffsetX;
+    const spriteY = -height / 2 + renderOffsetY;
 
     if (sprite?.complete) {
-      context.drawImage(
-        sprite,
-        -width / 2 + renderOffsetX,
-        -height / 2 + renderOffsetY,
-        width,
-        height
-      );
+      context.drawImage(sprite, spriteX, spriteY, width, height);
+      applyComponentThermalTint(context, spriteX, spriteY, width, height, thermalTint);
     } else if (width > 0 && height > 0) {
       context.fillStyle = palette.canvasSpriteFallback;
-      context.fillRect(-width / 2 + renderOffsetX, -height / 2 + renderOffsetY, width, height);
+      context.fillRect(spriteX, spriteY, width, height);
+      applyComponentThermalTint(context, spriteX, spriteY, width, height, thermalTint);
     }
 
     if (behavior.spriteOverlay === "op_amp_inputs") {
@@ -349,6 +351,49 @@ function drawComponentSelectionOutline(renderTarget, component) {
   context.strokeStyle = palette.canvasSelection;
   context.lineWidth = 2;
   context.strokeRect(rect.x - 4, rect.y - 4, rect.width + 8, rect.height + 8);
+}
+
+function applyComponentThermalTint(context, x, y, width, height, tint) {
+  if (!tint) return;
+
+  context.save();
+  context.globalCompositeOperation = "source-atop";
+  context.fillStyle = tint;
+  context.fillRect(x, y, width, height);
+  context.restore();
+}
+
+function getComponentThermalTint(component, palette) {
+  if (component.type !== "resistor" || !state.thermalModeActive || !state.simulationResult?.ok) {
+    return null;
+  }
+
+  const power = state.simulationResult.data.componentPowers?.get(component.id);
+  if (!(power > 0)) {
+    return null;
+  }
+
+  const ratio = quantizeThermalRatio(power / RESISTOR_THERMAL_RATED_POWER_W);
+  if (ratio <= 0) {
+    return null;
+  }
+
+  if (ratio <= 0.5) {
+    return mixColors(palette.canvasSpriteStroke, palette.canvasThermalResistorWarm, ratio / 0.5);
+  }
+
+  return mixColors(
+    palette.canvasThermalResistorWarm,
+    palette.canvasThermalResistorHot,
+    (ratio - 0.5) / 0.5
+  );
+}
+
+function quantizeThermalRatio(ratio) {
+  const clampedRatio = clamp(ratio, 0, 1);
+  return (
+    Math.round(clampedRatio * RESISTOR_THERMAL_BUCKET_COUNT) / RESISTOR_THERMAL_BUCKET_COUNT
+  );
 }
 
 function getComponentCanvasValueText(component) {

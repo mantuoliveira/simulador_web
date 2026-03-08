@@ -41,6 +41,8 @@ const DOUBLE_TAP_MAX_DISTANCE_PX = 28;
 const EMPTY_TAP_MOVE_TOLERANCE_PX = 10;
 const DELETE_BUTTON_HOLD_MS = 1000;
 const EXPORT_BUTTON_HOLD_MS = 1000;
+const RESISTOR_THERMAL_RATED_POWER_W = 0.125;
+const RESISTOR_THERMAL_BUCKET_COUNT = 8;
 const SIMULATION_BUTTON_ICONS = {
   idle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l10-6.5z"/></svg>',
   running:
@@ -79,6 +81,8 @@ const THEME_PALETTE_DEFAULTS = {
   canvasCurrentText: "#7f1d1d",
   canvasSpriteStroke: "#0f172a",
   canvasSpriteFill: "#e2e8f0",
+  canvasThermalResistorWarm: "#f97316",
+  canvasThermalResistorHot: "#dc2626",
 };
 
 const COMPONENT_DEFS = {
@@ -447,6 +451,8 @@ export {
   EMPTY_TAP_MOVE_TOLERANCE_PX,
   DELETE_BUTTON_HOLD_MS,
   EXPORT_BUTTON_HOLD_MS,
+  RESISTOR_THERMAL_RATED_POWER_W,
+  RESISTOR_THERMAL_BUCKET_COUNT,
   SIMULATION_BUTTON_ICONS,
   CURRENT_ARROW_BUTTON_ICONS,
   LIGHT_THEME,

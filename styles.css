@@ -70,6 +70,8 @@
   --canvas-current-text: #7f1d1d;
   --canvas-sprite-stroke: #0f172a;
   --canvas-sprite-fill: #e2e8f0;
+  --canvas-thermal-resistor-warm: #f97316;
+  --canvas-thermal-resistor-hot: #dc2626;
   --radius: 16px;
   --top-h: 76px;
   --bottom-content-h: 76px;
@@ -148,6 +150,8 @@
   --canvas-current-text: #fecdd3;
   --canvas-sprite-stroke: #e2e8f0;
   --canvas-sprite-fill: #203149;
+  --canvas-thermal-resistor-warm: #fb923c;
+  --canvas-thermal-resistor-hot: #f87171;
 }
 
 * {

@@ -280,6 +280,57 @@ function formatPower(value) {
   return formatEngineeringValue(value, "W");
 }
 
+function parseCssColor(color) {
+  const value = String(color || "").trim();
+  if (!value) return null;
+
+  if (value.startsWith("#")) {
+    const hex = value.slice(1);
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16),
+        g: parseInt(hex[1] + hex[1], 16),
+        b: parseInt(hex[2] + hex[2], 16),
+      };
+    }
+
+    if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+      };
+    }
+  }
+
+  const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/i);
+  if (!rgbMatch) return null;
+
+  const [r = 0, g = 0, b = 0] = rgbMatch[1]
+    .split(",")
+    .slice(0, 3)
+    .map((channel) => Number.parseFloat(channel.trim()));
+
+  return {
+    r: clamp(Number.isFinite(r) ? r : 0, 0, 255),
+    g: clamp(Number.isFinite(g) ? g : 0, 0, 255),
+    b: clamp(Number.isFinite(b) ? b : 0, 0, 255),
+  };
+}
+
+function mixColors(fromColor, toColor, amount) {
+  const from = parseCssColor(fromColor);
+  const to = parseCssColor(toColor);
+  const t = clamp(amount, 0, 1);
+
+  if (!from || !to) {
+    return t < 0.5 ? fromColor : toColor;
+  }
+
+  const mixChannel = (fromValue, toValue) => Math.round(fromValue + (toValue - fromValue) * t);
+  return `rgb(${mixChannel(from.r, to.r)}, ${mixChannel(from.g, to.g)}, ${mixChannel(from.b, to.b)})`;
+}
+
 function roundedRect(context, x, y, width, height, radius) {
   const r = Math.min(radius, width * 0.5, height * 0.5);
   context.beginPath();
@@ -536,6 +587,7 @@ export {
   formatSymmetricVoltage,
   formatCurrent,
   formatPower,
+  mixColors,
   roundedRect,
   svgToDataUri,
   buildOpAmpMarkerSvg,
