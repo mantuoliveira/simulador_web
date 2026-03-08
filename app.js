@@ -714,7 +714,7 @@ function toggleComponentTerminalOrderInCircuit(circuit, componentId) {
 function isComponentPlacementValidForComponents(components, candidate, ignoreId = null, padding = 0) {
   for (const component of components) {
     if (ignoreId != null && component.id === ignoreId) continue;
-    if (componentsOverlap(candidate, component, padding)) {
+    if (componentsRenderBoundsOverlap(candidate, component, padding)) {
       return false;
     }
   }
@@ -774,6 +774,57 @@ function getComponentBodyBounds(component) {
     top: Math.min(...ys),
     bottom: Math.max(...ys),
   };
+}
+
+function getComponentRenderBounds(component) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def) {
+    return getComponentBodyBounds(component);
+  }
+
+  const renderW = def.renderW || 0;
+  const renderH = def.renderH || 0;
+  if (renderW <= 0 || renderH <= 0) {
+    const footprint = getFootprintExtents(component);
+    return {
+      left: component.x - footprint.left,
+      right: component.x + footprint.right,
+      top: component.y - footprint.up,
+      bottom: component.y + footprint.down,
+    };
+  }
+
+  const halfW = renderW * 0.5;
+  const halfH = renderH * 0.5;
+  const offsetX = def.renderOffsetX || 0;
+  const offsetY = def.renderOffsetY || 0;
+  const corners = [
+    rotateOffset(-halfW + offsetX, -halfH + offsetY, component.rotation),
+    rotateOffset(halfW + offsetX, -halfH + offsetY, component.rotation),
+    rotateOffset(halfW + offsetX, halfH + offsetY, component.rotation),
+    rotateOffset(-halfW + offsetX, halfH + offsetY, component.rotation),
+  ];
+
+  const xs = corners.map((corner) => component.x + corner.x);
+  const ys = corners.map((corner) => component.y + corner.y);
+  return {
+    left: Math.min(...xs),
+    right: Math.max(...xs),
+    top: Math.min(...ys),
+    bottom: Math.max(...ys),
+  };
+}
+
+function componentsRenderBoundsOverlap(a, b, padding = 0) {
+  const boundsA = getComponentRenderBounds(a);
+  const boundsB = getComponentRenderBounds(b);
+
+  return (
+    boundsA.left < boundsB.right + padding &&
+    boundsA.right + padding > boundsB.left &&
+    boundsA.top < boundsB.bottom + padding &&
+    boundsA.bottom + padding > boundsB.top
+  );
 }
 
 function componentsBodiesOverlap(a, b, padding = 0) {
