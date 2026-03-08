@@ -33,7 +33,7 @@ async function exportCircuitBlob({ background = "white" } = {}) {
   const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
   const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
   const exportDpr = Math.max(1, EXPORT_SCALE);
-  const exportCanvas = document.createElement("canvas");
+  const exportCanvas = createAlphaCanvas();
   const exportRenderTarget = createRenderTarget(exportCanvas, {
     width,
     height,
@@ -55,6 +55,13 @@ async function exportCircuitBlob({ background = "white" } = {}) {
   const finalCanvas =
     background === "white" ? applyCanvasBackground(trimmedCanvas, "#ffffff") : trimmedCanvas;
   return canvasToBlob(finalCanvas, "image/png");
+}
+
+function createAlphaCanvas(width = 1, height = 1) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(width));
+  canvas.height = Math.max(1, Math.floor(height));
+  return canvas;
 }
 
 function canvasToBlob(canvas, type) {
@@ -120,11 +127,9 @@ function buildExportFileName() {
 }
 
 function applyCanvasBackground(sourceCanvas, fillStyle) {
-  const outputCanvas = document.createElement("canvas");
-  outputCanvas.width = sourceCanvas.width;
-  outputCanvas.height = sourceCanvas.height;
+  const outputCanvas = createAlphaCanvas(sourceCanvas.width, sourceCanvas.height);
 
-  const outputCtx = outputCanvas.getContext("2d");
+  const outputCtx = outputCanvas.getContext("2d", { alpha: true });
   if (!outputCtx) {
     return sourceCanvas;
   }
@@ -136,7 +141,7 @@ function applyCanvasBackground(sourceCanvas, fillStyle) {
 }
 
 function trimCanvas(sourceCanvas, paddingPx = 0) {
-  const sourceCtx = sourceCanvas.getContext("2d");
+  const sourceCtx = sourceCanvas.getContext("2d", { alpha: true });
   if (!sourceCtx) {
     return sourceCanvas;
   }
@@ -168,11 +173,9 @@ function trimCanvas(sourceCanvas, paddingPx = 0) {
   const top = Math.max(0, minY - paddingPx);
   const right = Math.min(width - 1, maxX + paddingPx);
   const bottom = Math.min(height - 1, maxY + paddingPx);
-  const trimmedCanvas = document.createElement("canvas");
-  trimmedCanvas.width = right - left + 1;
-  trimmedCanvas.height = bottom - top + 1;
+  const trimmedCanvas = createAlphaCanvas(right - left + 1, bottom - top + 1);
 
-  const trimmedCtx = trimmedCanvas.getContext("2d");
+  const trimmedCtx = trimmedCanvas.getContext("2d", { alpha: true });
   if (!trimmedCtx) {
     return sourceCanvas;
   }

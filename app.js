@@ -490,11 +490,13 @@ function getInitialCameraZoom() {
 const state = {
   components: [],
   wires: [],
+  terminalLabels: new Map(),
   nextComponentId: 1,
   nextWireId: 1,
   nextSplitGroupId: 1,
   selectedComponentId: null,
   selectedWireId: null,
+  selectedTerminalLabelKey: null,
   selectedNodeMarkerRoot: null,
   selectedNodeMarkerTerminal: null,
   pendingTerminal: null,
@@ -531,6 +533,7 @@ const appEls = {
   canvasWrap: document.getElementById("canvas-wrap"),
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
+  editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
   exportBtn: document.getElementById("export-btn"),
   currentArrowBtn: document.getElementById("current-arrow-btn"),
   rotateBtn: document.getElementById("rotate-btn"),
@@ -541,6 +544,10 @@ const appEls = {
   wheelPointer: document.querySelector(".wheel-pointer"),
   wheelValue: document.getElementById("wheel-value"),
   wheelTitle: document.getElementById("wheel-title"),
+  terminalLabelModal: document.getElementById("terminal-label-modal"),
+  terminalLabelForm: document.getElementById("terminal-label-form"),
+  terminalLabelInput: document.getElementById("terminal-label-input"),
+  terminalLabelCancel: document.getElementById("terminal-label-cancel"),
 };
 
 const mainRenderTarget = createRenderTarget(appEls.canvas);
@@ -578,6 +585,10 @@ const exportButtonHoldState = {
   suppressNextClick: false,
 };
 
+const terminalLabelEditorState = {
+  terminalRef: null,
+};
+
 const spriteMap = loadSprites();
 
 function createRenderTarget(
@@ -588,7 +599,7 @@ function createRenderTarget(
     dpr = Math.max(1, window.devicePixelRatio || 1),
   } = {}
 ) {
-  const context = canvas?.getContext("2d");
+  const context = canvas?.getContext("2d", { alpha: true });
   if (!context) {
     throw new Error("canvas context unavailable");
   }
@@ -720,6 +731,13 @@ function resizeCanvas() {
 
 function setupButtons() {
   setSimulationButtonState(false);
+  setupTerminalLabelModal();
+
+  appEls.editTerminalLabelBtn.addEventListener("click", () => {
+    const terminalRef = getTerminalLabelEditorTarget();
+    if (!terminalRef) return;
+    openTerminalLabelEditor(terminalRef);
+  });
 
   appEls.simulateBtn.addEventListener("click", () => {
     if (!state.simulationActive) {
@@ -771,14 +789,33 @@ function setupButtons() {
   setupDeleteButtonGestures();
 }
 
+function setupTerminalLabelModal() {
+  appEls.terminalLabelForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveTerminalLabelFromEditor();
+  });
+
+  appEls.terminalLabelCancel.addEventListener("click", () => {
+    closeTerminalLabelEditor();
+  });
+
+  appEls.terminalLabelModal.addEventListener("pointerdown", (event) => {
+    if (event.target === appEls.terminalLabelModal) {
+      closeTerminalLabelEditor();
+    }
+  });
+}
+
 function clearCircuit() {
   state.components = [];
   state.wires = [];
+  state.terminalLabels.clear();
   state.nextComponentId = 1;
   state.nextWireId = 1;
   state.nextSplitGroupId = 1;
   state.selectedComponentId = null;
   state.selectedWireId = null;
+  state.selectedTerminalLabelKey = null;
   state.selectedNodeMarkerRoot = null;
   state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
@@ -787,6 +824,7 @@ function clearCircuit() {
   state.hiddenNodeMarkerRoots.clear();
 
   setSimulationButtonState(false);
+  closeTerminalLabelEditor();
   updateSelectionUi();
   requestRender(true);
   showStatus("Canvas limpo");
@@ -804,6 +842,12 @@ function canToggleCurrentArrow(component) {
   return !!component && isSimulatedBranchComponent(component.type) && component.type !== "ground";
 }
 
+function canToggleComponentValueLabel(component) {
+  if (!component) return false;
+  const def = COMPONENT_DEFS[component.type];
+  return !!def && def.editable === true && def.showValueLabel !== false;
+}
+
 function canToggleNodeMarkerVoltage(nodeMarker) {
   return !!nodeMarker && state.simulationActive && state.simulationResult?.ok;
 }
@@ -814,6 +858,10 @@ function setVisibilityToggleButtonState({ mode, hidden }) {
       ? hidden
         ? "Mostrar tensão do nó"
         : "Ocultar tensão do nó"
+      : mode === "value"
+        ? hidden
+          ? "Mostrar valor do componente"
+          : "Ocultar valor do componente"
       : hidden
         ? "Mostrar seta de corrente"
         : "Ocultar seta de corrente";
@@ -844,6 +892,17 @@ function toggleSelectedAnnotationVisibility() {
   }
 
   const component = getComponentById(state.selectedComponentId);
+  if (canToggleComponentValueLabel(component)) {
+    component.valueLabelHidden = component.valueLabelHidden !== true;
+    setVisibilityToggleButtonState({
+      mode: "value",
+      hidden: component.valueLabelHidden === true,
+    });
+    requestRender(true);
+    showStatus(component.valueLabelHidden ? "Valor do componente ocultado" : "Valor do componente visível");
+    return;
+  }
+
   if (!canToggleCurrentArrow(component)) return;
 
   component.currentArrowHidden = component.currentArrowHidden !== true;
@@ -1111,7 +1170,13 @@ function setupKeyboardShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Delete") return;
     if (isEditableTarget(event.target)) return;
-    if (state.selectedComponentId == null && state.selectedWireId == null) return;
+    if (
+      state.selectedComponentId == null &&
+      state.selectedWireId == null &&
+      state.selectedTerminalLabelKey == null
+    ) {
+      return;
+    }
 
     event.preventDefault();
     handleDeleteAction();
@@ -1126,6 +1191,11 @@ function handleDeleteAction() {
 
   if (state.selectedWireId != null) {
     removeWire(state.selectedWireId);
+    return;
+  }
+
+  if (state.selectedTerminalLabelKey != null) {
+    removeTerminalLabel(state.selectedTerminalLabelKey);
   }
 }
 
@@ -1261,9 +1331,17 @@ function setupCanvasGestures() {
       return;
     }
 
+    const terminalLabelHit = pickTerminalLabel(canvasPoint.x, canvasPoint.y);
+    if (terminalLabelHit) {
+      clearEmptyCanvasTapHistory();
+      selectTerminalLabel(terminalLabelHit);
+      return;
+    }
+
     const point = clientToWorld(event.clientX, event.clientY);
     const terminalHit = pickTerminal(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS);
     if (terminalHit) {
+      clearEmptyCanvasTapHistory();
       handleTerminalTap(terminalHit.componentId, terminalHit.terminalIndex);
       return;
     }
@@ -1670,7 +1748,9 @@ function drawComponents(renderTarget, showSelection = true) {
       context.stroke();
     }
 
-    if (def.editable && def.showValueLabel !== false) {
+    drawComponentTerminalLabels(renderTarget, component);
+
+    if (def.editable && def.showValueLabel !== false && component.valueLabelHidden !== true) {
       const labelPoint = getValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
       const valueText = formatComponentValue(component);
@@ -1689,6 +1769,25 @@ function getTerminalRenderRadius(componentType) {
   const minRadius = isJunction ? 4.2 : 3.4;
   const maxRadius = isJunction ? 10.8 : 8.8;
   return clamp(worldLengthToScreen(gridRadius), minRadius, maxRadius);
+}
+
+function drawComponentTerminalLabels(renderTarget, component) {
+  const def = COMPONENT_DEFS[component.type];
+  for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
+    const label = getTerminalLabel(component.id, terminalIndex);
+    if (!label) continue;
+
+    const metrics = getTerminalLabelRenderMetrics(renderTarget, {
+      componentId: component.id,
+      terminalIndex,
+      label,
+    });
+    if (!metrics) continue;
+
+    const { context } = renderTarget;
+    context.fillStyle = state.selectedTerminalLabelKey === metrics.labelKey ? "#0ea5a8" : "#0f172a";
+    drawTerminalLabelText(context, metrics);
+  }
 }
 
 function drawOpAmpInputMarkers(renderTarget, component) {
@@ -1860,6 +1959,103 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up") 
   };
 }
 
+function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalIndex, label }) {
+  const terminalPosition = getTerminalPosition(componentId, terminalIndex);
+  if (!terminalPosition || !label) return null;
+
+  const { context } = renderTarget;
+  const screenPoint = worldToScreen(terminalPosition.x, terminalPosition.y);
+  const labelDirection = getTerminalLabelDirection(componentId, terminalIndex);
+  const textLayout = getTerminalLabelTextLayout(context, label);
+  const padX = 8;
+  const boxW = textLayout.totalWidth + padX * 2;
+  const boxH = textLayout.boxHeight;
+  const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection);
+
+  return {
+    label,
+    labelKey: terminalKey(componentId, terminalIndex),
+    textLayout,
+    boxW,
+    boxH,
+    boxX: placement.boxX,
+    boxY: placement.boxY,
+    textX: placement.textX,
+    textY: placement.textY,
+  };
+}
+
+function parseTerminalLabelText(label) {
+  const text = String(label || "");
+  const separatorIndex = text.indexOf("_");
+  if (separatorIndex <= 0 || separatorIndex >= text.length - 1) {
+    return {
+      mainText: text,
+      subText: "",
+    };
+  }
+
+  return {
+    mainText: text.slice(0, separatorIndex),
+    subText: text.slice(separatorIndex + 1),
+  };
+}
+
+function getTerminalLabelTextLayout(context, label) {
+  const { mainText, subText } = parseTerminalLabelText(label);
+  const mainFontPx = Math.max(18, 18 * state.camera.zoom);
+  const subFontPx = Math.max(13, mainFontPx * 0.72);
+  const mainFont = `${mainFontPx}px "Avenir Next", sans-serif`;
+  const subFont = `${subFontPx}px "Avenir Next", sans-serif`;
+
+  context.font = mainFont;
+  const mainWidth = context.measureText(mainText).width;
+  context.font = subFont;
+  const subWidth = subText ? context.measureText(subText).width : 0;
+
+  const totalWidth = mainWidth + subWidth;
+  const subscriptDrop = subText ? Math.max(3, mainFontPx * 0.28) : 0;
+  const top = -mainFontPx * 0.72;
+  const bottom = Math.max(mainFontPx * 0.22, subscriptDrop + subFontPx * 0.22);
+  const baselineOffset = -((top + bottom) * 0.5);
+  const boxHeight = Math.max(28, bottom - top + 6);
+
+  return {
+    mainText,
+    subText,
+    mainFont,
+    subFont,
+    mainWidth,
+    subWidth,
+    totalWidth,
+    subscriptDrop,
+    baselineOffset,
+    boxHeight,
+  };
+}
+
+function drawTerminalLabelText(context, metrics) {
+  const { textX, textY, textLayout } = metrics;
+  const startX = textX - textLayout.totalWidth * 0.5;
+  const baselineY = textY + textLayout.baselineOffset;
+
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  context.font = textLayout.mainFont;
+  context.fillText(textLayout.mainText, startX, baselineY);
+
+  if (!textLayout.subText) {
+    return;
+  }
+
+  context.font = textLayout.subFont;
+  context.fillText(
+    textLayout.subText,
+    startX + textLayout.mainWidth,
+    baselineY + textLayout.subscriptDrop
+  );
+}
+
 function drawCurrentArrow(renderTarget, component, current) {
   const { context } = renderTarget;
   const def = COMPONENT_DEFS[component.type];
@@ -1982,6 +2178,14 @@ function startSingleTouch(touch) {
   if (nodeMarkerHit) {
     clearEmptyCanvasTapHistory();
     selectNodeMarker(nodeMarkerHit.root);
+    state.pointer.mode = "none";
+    return;
+  }
+
+  const terminalLabelHit = pickTerminalLabel(canvasPoint.x, canvasPoint.y);
+  if (terminalLabelHit) {
+    clearEmptyCanvasTapHistory();
+    selectTerminalLabel(terminalLabelHit);
     state.pointer.mode = "none";
     return;
   }
@@ -2177,7 +2381,9 @@ function registerEmptyCanvasTap(screenX, screenY, timestamp = Date.now()) {
 }
 
 function isCanvasPointEmpty(worldX, worldY, terminalThreshold) {
+  const screenPoint = worldToScreen(worldX, worldY);
   return (
+    !pickTerminalLabel(screenPoint.x, screenPoint.y) &&
     !pickTerminal(worldX, worldY, terminalThreshold) &&
     !pickComponentBody(worldX, worldY) &&
     !pickWire(worldX, worldY)
@@ -2196,8 +2402,13 @@ function handleTerminalTap(componentId, terminalIndex) {
     return;
   }
 
-  if (state.selectedWireId != null || state.selectedNodeMarkerRoot != null) {
+  if (
+    state.selectedWireId != null ||
+    state.selectedNodeMarkerRoot != null ||
+    state.selectedTerminalLabelKey != null
+  ) {
     state.selectedWireId = null;
+    state.selectedTerminalLabelKey = null;
     state.selectedNodeMarkerRoot = null;
     state.selectedNodeMarkerTerminal = null;
     updateSelectionUi();
@@ -2205,14 +2416,14 @@ function handleTerminalTap(componentId, terminalIndex) {
 
   if (!state.pendingTerminal) {
     state.pendingTerminal = { componentId, terminalIndex };
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
   const first = state.pendingTerminal;
   if (first.componentId === componentId && first.terminalIndex === terminalIndex) {
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2222,7 +2433,7 @@ function handleTerminalTap(componentId, terminalIndex) {
     } else {
       showStatus("Conexão no mesmo componente não permitida", true);
       state.pendingTerminal = null;
-      requestRender(true);
+      updateSelectionUi();
       return;
     }
   }
@@ -2236,7 +2447,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   ) {
     showStatus("Conexão já existe", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2244,7 +2455,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   const end = getTerminalPosition(componentId, terminalIndex);
   if (!start || !end) {
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2252,7 +2463,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   if (!route) {
     showStatus("Não foi possível rotear o fio", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2264,6 +2475,7 @@ function handleTerminalTap(componentId, terminalIndex) {
   });
 
   state.pendingTerminal = null;
+  updateSelectionUi();
   onCircuitChanged();
 }
 
@@ -2303,7 +2515,7 @@ function handleWireTap(wireHit) {
   const start = getTerminalPosition(pending.componentId, pending.terminalIndex);
   if (!start) {
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2311,7 +2523,7 @@ function handleWireTap(wireHit) {
   if (!splitPaths) {
     showStatus("Nao foi possivel dividir o fio", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2319,7 +2531,7 @@ function handleWireTap(wireHit) {
   if (!isComponentPlacementValid(junction, null, 0)) {
     showStatus("Nao foi possivel criar a juncao", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2327,7 +2539,7 @@ function handleWireTap(wireHit) {
   if (!branchRoute) {
     showStatus("Nao foi possivel conectar ao fio", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
@@ -2343,11 +2555,12 @@ function handleWireTap(wireHit) {
   if (!result.ok) {
     showStatus(result.message || "Nao foi possivel criar a derivacao", true);
     state.pendingTerminal = null;
-    requestRender(true);
+    updateSelectionUi();
     return;
   }
 
   state.pendingTerminal = null;
+  updateSelectionUi();
   onCircuitChanged();
 }
 
@@ -3048,6 +3261,38 @@ function pickWire(worldX, worldY) {
   return null;
 }
 
+function pickTerminalLabel(screenX, screenY, renderTarget = mainRenderTarget) {
+  const hitPadding = 6;
+
+  for (let i = state.components.length - 1; i >= 0; i -= 1) {
+    const component = state.components[i];
+    const def = COMPONENT_DEFS[component.type];
+
+    for (let terminalIndex = def.terminals.length - 1; terminalIndex >= 0; terminalIndex -= 1) {
+      const label = getTerminalLabel(component.id, terminalIndex);
+      if (!label) continue;
+
+      const metrics = getTerminalLabelRenderMetrics(renderTarget, {
+        componentId: component.id,
+        terminalIndex,
+        label,
+      });
+      if (!metrics) continue;
+
+      if (
+        screenX >= metrics.boxX - hitPadding &&
+        screenX <= metrics.boxX + metrics.boxW + hitPadding &&
+        screenY >= metrics.boxY - hitPadding &&
+        screenY <= metrics.boxY + metrics.boxH + hitPadding
+      ) {
+        return { componentId: component.id, terminalIndex };
+      }
+    }
+  }
+
+  return null;
+}
+
 function pickNodeMarker(screenX, screenY, renderTarget = mainRenderTarget) {
   if (!state.simulationActive || !state.simulationResult?.ok) return null;
 
@@ -3129,6 +3374,7 @@ function worldToLocal(component, worldX, worldY) {
 function selectComponent(componentId) {
   state.selectedComponentId = componentId;
   state.selectedWireId = null;
+  state.selectedTerminalLabelKey = null;
   state.selectedNodeMarkerRoot = null;
   state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
@@ -3138,6 +3384,17 @@ function selectComponent(componentId) {
 function selectWire(wireId) {
   state.selectedWireId = wireId;
   state.selectedComponentId = null;
+  state.selectedTerminalLabelKey = null;
+  state.selectedNodeMarkerRoot = null;
+  state.selectedNodeMarkerTerminal = null;
+  state.pendingTerminal = null;
+  updateSelectionUi();
+}
+
+function selectTerminalLabel(terminalRef) {
+  state.selectedTerminalLabelKey = terminalKey(terminalRef.componentId, terminalRef.terminalIndex);
+  state.selectedComponentId = null;
+  state.selectedWireId = null;
   state.selectedNodeMarkerRoot = null;
   state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
@@ -3149,6 +3406,7 @@ function selectNodeMarker(root, terminalRef = null) {
   state.selectedNodeMarkerTerminal = terminalRef ? cloneTerminalRef(terminalRef) : null;
   state.selectedComponentId = null;
   state.selectedWireId = null;
+  state.selectedTerminalLabelKey = null;
   state.pendingTerminal = null;
   updateSelectionUi();
 }
@@ -3156,6 +3414,7 @@ function selectNodeMarker(root, terminalRef = null) {
 function clearSelection() {
   state.selectedComponentId = null;
   state.selectedWireId = null;
+  state.selectedTerminalLabelKey = null;
   state.selectedNodeMarkerRoot = null;
   state.selectedNodeMarkerTerminal = null;
   state.pendingTerminal = null;
@@ -3178,6 +3437,19 @@ function removeWire(wireId) {
   updateSelectionUi();
   onCircuitChanged();
   showStatus("Conector removido");
+}
+
+function removeTerminalLabel(labelKey) {
+  if (!state.terminalLabels.has(labelKey)) return;
+
+  state.terminalLabels.delete(labelKey);
+  if (state.selectedTerminalLabelKey === labelKey) {
+    state.selectedTerminalLabelKey = null;
+  }
+  closeTerminalLabelEditor();
+  updateSelectionUi();
+  onCircuitChanged();
+  showStatus("Label do pad removido");
 }
 
 function collectWireCleanupTargets(wires) {
@@ -3342,6 +3614,17 @@ function removeComponentFromCircuit(circuit, componentId) {
     circuit.selectedComponentId = null;
   }
 
+  if (circuit.terminalLabels instanceof Map) {
+    for (const labelKey of [...circuit.terminalLabels.keys()]) {
+      const ref = parseTerminalKey(labelKey);
+      if (ref?.componentId !== componentId) continue;
+      circuit.terminalLabels.delete(labelKey);
+      if (circuit.selectedTerminalLabelKey === labelKey) {
+        circuit.selectedTerminalLabelKey = null;
+      }
+    }
+  }
+
   cleanupAutoJunctionsInCircuit(circuit, cleanupTargets);
   clearInvalidSelectionsInCircuit(circuit);
   return { ok: true, removedWires };
@@ -3413,6 +3696,24 @@ function clearInvalidSelectionsInCircuit(circuit) {
       !selectedTerminalDef.terminals[circuit.selectedNodeMarkerTerminal.terminalIndex]
     ) {
       circuit.selectedNodeMarkerTerminal = null;
+      changed = true;
+    }
+  }
+
+  if (circuit.selectedTerminalLabelKey != null) {
+    const selectedLabelRef = parseTerminalKey(circuit.selectedTerminalLabelKey);
+    const selectedLabelComponent = selectedLabelRef
+      ? getComponentByIdFromCollection(circuit.components, selectedLabelRef.componentId)
+      : null;
+    const selectedLabelDef = selectedLabelComponent ? COMPONENT_DEFS[selectedLabelComponent.type] : null;
+    const selectedLabelStillExists =
+      selectedLabelRef &&
+      selectedLabelComponent &&
+      selectedLabelDef?.terminals[selectedLabelRef.terminalIndex] &&
+      circuit.terminalLabels instanceof Map &&
+      circuit.terminalLabels.has(circuit.selectedTerminalLabelKey);
+    if (!selectedLabelStillExists) {
+      circuit.selectedTerminalLabelKey = null;
       changed = true;
     }
   }
@@ -3519,13 +3820,19 @@ function updateSelectionUi() {
 
   const component = getComponentById(state.selectedComponentId);
   const wire = getWireById(state.selectedWireId);
+  const terminalPending = state.pendingTerminal != null;
+  const terminalLabelTarget = getTerminalLabelEditorTarget();
+  const terminalLabelSelected = state.selectedTerminalLabelKey != null;
   const nodeMarker = getSelectedNodeMarker();
   const canExport = state.components.length > 0;
 
-  if (!component && !wire && !nodeMarker) {
+  appEls.editTerminalLabelBtn.classList.toggle("hidden", !terminalLabelTarget);
+
+  if (!component && !wire && !nodeMarker && !terminalLabelSelected && !terminalPending) {
     clearDeleteButtonHold();
     deleteButtonHoldState.suppressNextClick = false;
     appEls.exportBtn.classList.toggle("hidden", !canExport);
+    appEls.editTerminalLabelBtn.classList.add("hidden");
     appEls.currentArrowBtn.classList.add("hidden");
     appEls.rotateBtn.classList.add("hidden");
     appEls.deleteBtn.classList.add("hidden");
@@ -3535,6 +3842,24 @@ function updateSelectionUi() {
   }
 
   appEls.exportBtn.classList.add("hidden");
+
+  if (terminalPending) {
+    appEls.deleteBtn.classList.add("hidden");
+    appEls.currentArrowBtn.classList.add("hidden");
+    appEls.rotateBtn.classList.add("hidden");
+    appEls.swapOpAmpBtn.classList.add("hidden");
+    appEls.valueWheel.classList.add("hidden");
+    return;
+  }
+
+  if (terminalLabelSelected) {
+    appEls.deleteBtn.classList.remove("hidden");
+    appEls.currentArrowBtn.classList.add("hidden");
+    appEls.rotateBtn.classList.add("hidden");
+    appEls.swapOpAmpBtn.classList.add("hidden");
+    appEls.valueWheel.classList.add("hidden");
+    return;
+  }
 
   if (nodeMarker) {
     appEls.deleteBtn.classList.add("hidden");
@@ -3564,7 +3889,13 @@ function updateSelectionUi() {
     return;
   }
 
-  if (state.simulationActive && canToggleCurrentArrow(component)) {
+  if (canToggleComponentValueLabel(component)) {
+    setVisibilityToggleButtonState({
+      mode: "value",
+      hidden: component.valueLabelHidden === true,
+    });
+    appEls.currentArrowBtn.classList.remove("hidden");
+  } else if (state.simulationActive && canToggleCurrentArrow(component)) {
     setVisibilityToggleButtonState({
       mode: "component",
       hidden: component.currentArrowHidden === true,
@@ -3796,6 +4127,77 @@ function getComponentById(id) {
 
 function getWireById(id) {
   return getWireByIdFromCollection(state.wires, id);
+}
+
+function getTerminalLabel(componentId, terminalIndex) {
+  return state.terminalLabels.get(terminalKey(componentId, terminalIndex)) || "";
+}
+
+function getTerminalLabelEditorTarget() {
+  if (state.pendingTerminal) {
+    return cloneTerminalRef(state.pendingTerminal);
+  }
+
+  if (state.selectedTerminalLabelKey != null) {
+    return parseTerminalKey(state.selectedTerminalLabelKey);
+  }
+
+  return null;
+}
+
+function setTerminalLabel(componentId, terminalIndex, label) {
+  const labelKey = terminalKey(componentId, terminalIndex);
+  const trimmed = String(label || "").trim();
+  if (!trimmed) {
+    state.terminalLabels.delete(labelKey);
+    if (state.selectedTerminalLabelKey === labelKey) {
+      state.selectedTerminalLabelKey = null;
+    }
+    return false;
+  }
+
+  state.terminalLabels.set(labelKey, trimmed);
+  state.selectedTerminalLabelKey = labelKey;
+  return true;
+}
+
+function openTerminalLabelEditor(terminalRef) {
+  terminalLabelEditorState.terminalRef = cloneTerminalRef(terminalRef);
+  appEls.terminalLabelInput.value = getTerminalLabel(terminalRef.componentId, terminalRef.terminalIndex);
+  appEls.terminalLabelModal.classList.remove("hidden");
+  appEls.terminalLabelModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    appEls.terminalLabelInput.focus();
+    appEls.terminalLabelInput.select();
+  }, 0);
+}
+
+function closeTerminalLabelEditor() {
+  terminalLabelEditorState.terminalRef = null;
+  appEls.terminalLabelModal.classList.add("hidden");
+  appEls.terminalLabelModal.setAttribute("aria-hidden", "true");
+}
+
+function saveTerminalLabelFromEditor() {
+  const terminalRef = terminalLabelEditorState.terminalRef;
+  if (!terminalRef) return;
+
+  const hadLabel = !!getTerminalLabel(terminalRef.componentId, terminalRef.terminalIndex);
+  const hasLabel = setTerminalLabel(
+    terminalRef.componentId,
+    terminalRef.terminalIndex,
+    appEls.terminalLabelInput.value
+  );
+  closeTerminalLabelEditor();
+  updateSelectionUi();
+  onCircuitChanged();
+
+  if (hasLabel) {
+    showStatus("Label do pad salvo");
+    return;
+  }
+
+  showStatus(hadLabel ? "Label do pad removido" : "Label do pad vazio", !hadLabel);
 }
 
 function getCardinalValueLabelAnchor(component, offset) {
