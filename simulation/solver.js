@@ -25,6 +25,7 @@ import {
   evaluateDiodeModel,
   evaluateMosfetModel,
   evaluateOpAmpModel,
+  evaluateZenerModel,
   maxAbsValue,
   multiplyMatrixVector,
   safeResistance,
@@ -159,6 +160,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     isIdealVoltageSourceComponent(component)
   );
   const diodes = activeComponents.filter((component) => component.type === "diode");
+  const zeners = activeComponents.filter((component) => component.type === "zener_diode");
   const bjts = activeComponents.filter((component) => isBjtComponentType(component));
   const mosfets = activeComponents.filter((component) => isMosfetComponentType(component));
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
@@ -187,11 +189,12 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   );
 
   let solution = null;
-  if (diodes.length > 0 || bjts.length > 0 || mosfets.length > 0 || opAmps.length > 0) {
+  if (diodes.length > 0 || zeners.length > 0 || bjts.length > 0 || mosfets.length > 0 || opAmps.length > 0) {
     solution = solveNonlinearCircuit({
       baseMatrix: linearSystem.A,
       baseVector: linearSystem.z,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -241,6 +244,8 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       componentCurrents.set(component.id, component.value || 0);
     } else if (component.type === "diode") {
       componentCurrents.set(component.id, evaluateDiodeModel(component, v0 - v1).current);
+    } else if (component.type === "zener_diode") {
+      componentCurrents.set(component.id, evaluateZenerModel(component, v0 - v1).current);
     } else if (isBjtComponentType(component)) {
       const rBase = rootByTerminal.get(terminalKey(component.id, BJT_BASE_TERMINAL_INDEX));
       const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
@@ -430,6 +435,7 @@ function solveNonlinearCircuit({
   baseMatrix,
   baseVector,
   diodes,
+  zeners,
   bjts,
   mosfets,
   opAmps,
@@ -449,6 +455,7 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -465,11 +472,12 @@ function solveNonlinearCircuit({
 
   if (linearGuess) {
     const directFromLinear = runNewtonIterations(
-      linearGuess.slice(),
-      baseMatrix,
-      baseVector,
-      diodes,
-      bjts,
+        linearGuess.slice(),
+        baseMatrix,
+        baseVector,
+        diodes,
+        zeners,
+        bjts,
       mosfets,
       opAmps,
       nodeCount,
@@ -497,6 +505,7 @@ function solveNonlinearCircuit({
       baseMatrix,
       scaledBaseVector,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -515,6 +524,7 @@ function solveNonlinearCircuit({
           baseMatrix,
           scaledBaseVector,
           diodes,
+          zeners,
           bjts,
           mosfets,
           opAmps,
@@ -544,6 +554,7 @@ function solveNonlinearCircuit({
     baseMatrix,
     baseVector,
     diodes,
+    zeners,
     bjts,
     mosfets,
     opAmps,
@@ -563,6 +574,7 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -583,6 +595,7 @@ function solveNonlinearCircuit({
       baseMatrix,
       baseVector,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -602,6 +615,7 @@ function runNewtonIterations(
   baseMatrix,
   baseVector,
   diodes,
+  zeners,
   bjts,
   mosfets,
   opAmps,
@@ -619,6 +633,7 @@ function runNewtonIterations(
       baseMatrix,
       baseVector,
       diodes,
+      zeners,
       bjts,
       mosfets,
       opAmps,
@@ -653,6 +668,7 @@ function runNewtonIterations(
         vector.map((value, index) => value + step[index] * damping),
         vector,
         diodes,
+        zeners,
         bjts,
         mosfets,
         rootByTerminal,
@@ -663,6 +679,7 @@ function runNewtonIterations(
         baseMatrix,
         baseVector,
         diodes,
+        zeners,
         bjts,
         mosfets,
         opAmps,
@@ -706,6 +723,7 @@ function evaluateNonlinearSystem(
   baseMatrix,
   baseVector,
   diodes,
+  zeners,
   bjts,
   mosfets,
   opAmps,
@@ -729,6 +747,33 @@ function evaluateNonlinearSystem(
     const v0 = n0 >= 0 ? vector[n0] : 0;
     const v1 = n1 >= 0 ? vector[n1] : 0;
     const { current, conductance } = evaluateDiodeModel(component, v0 - v1);
+    const scaledCurrent = current * deviceScale;
+    const scaledConductance = conductance * deviceScale;
+
+    if (n0 >= 0) {
+      residual[n0] += scaledCurrent;
+      jacobian[n0][n0] += scaledConductance;
+    }
+
+    if (n1 >= 0) {
+      residual[n1] -= scaledCurrent;
+      jacobian[n1][n1] += scaledConductance;
+    }
+
+    if (n0 >= 0 && n1 >= 0) {
+      jacobian[n0][n1] -= scaledConductance;
+      jacobian[n1][n0] -= scaledConductance;
+    }
+  }
+
+  for (const component of zeners) {
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+    const v0 = n0 >= 0 ? vector[n0] : 0;
+    const v1 = n1 >= 0 ? vector[n1] : 0;
+    const { current, conductance } = evaluateZenerModel(component, v0 - v1);
     const scaledCurrent = current * deviceScale;
     const scaledConductance = conductance * deviceScale;
 
@@ -826,6 +871,7 @@ function evaluateResidualNorm(
   baseMatrix,
   baseVector,
   diodes,
+  zeners,
   bjts,
   mosfets,
   opAmps,
@@ -840,6 +886,7 @@ function evaluateResidualNorm(
     baseMatrix,
     baseVector,
     diodes,
+    zeners,
     bjts,
     mosfets,
     opAmps,
@@ -902,16 +949,25 @@ function limitCandidateJunctionVoltages(
   candidate,
   previousVector,
   diodes,
+  zeners,
   bjts,
   _mosfets,
   rootByTerminal,
   getNodeIdx
 ) {
-  if (!diodes.length && !bjts.length) return candidate;
+  if (!diodes.length && !zeners.length && !bjts.length) return candidate;
 
   const limited = candidate.slice();
 
   for (const component of diodes) {
+    const r0 = rootByTerminal.get(terminalKey(component.id, 0));
+    const r1 = rootByTerminal.get(terminalKey(component.id, 1));
+    const n0 = getNodeIdx(r0);
+    const n1 = getNodeIdx(r1);
+    limitBranchVoltageStep(limited, previousVector, n0, n1, MAX_DIODE_VOLTAGE_STEP);
+  }
+
+  for (const component of zeners) {
     const r0 = rootByTerminal.get(terminalKey(component.id, 0));
     const r1 = rootByTerminal.get(terminalKey(component.id, 1));
     const n0 = getNodeIdx(r0);

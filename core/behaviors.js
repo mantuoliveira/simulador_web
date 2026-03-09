@@ -26,6 +26,7 @@ import {
   buildMosfetPSvg,
   buildOpAmpSvg,
   buildResistorSvg,
+  buildZenerDiodeSvg,
   buildVoltageNodeSvg,
   buildVoltageSourceSvg,
   clamp,
@@ -205,6 +206,62 @@ const COMPONENT_BEHAVIORS = {
   diode: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildDiodeSvg(options),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: () => ({
+      sideSign: 1,
+      lateralOffset: 1.2,
+      textOffsetExtra: 0,
+    }),
+  },
+  zener_diode: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      vz: 5.1,
+      rz: 10,
+      activeEditableParam: "vz",
+    }),
+    buildSvg: (options = {}) => buildZenerDiodeSvg(options),
+    formatValue: (component) =>
+      component.activeEditableParam === "rz"
+        ? `Rz=${formatResistance(component.rz)}`
+        : `Vz=${formatVoltage(component.vz)}`,
+    formatWheelValue: (component) =>
+      component.activeEditableParam === "rz"
+        ? `Rz=${formatEngineeringValueFixed(component.rz, "Ω", 1)}`
+        : `Vz=${formatEngineeringValueFixed(component.vz, "V", 1)}`,
+    valueFromNormalized: (component, normalized) => {
+      const clamped = clamp(normalized, 0, 1);
+      if (component.activeEditableParam === "rz") {
+        return quantizeResistor(Math.pow(10, 4 * clamped));
+      }
+
+      return roundTo(1 + 23 * clamped, 1);
+    },
+    normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "rz") {
+        const safe = clamp(component.rz, 1, 10_000);
+        return clamp(Math.log10(safe) / 4, 0, 1);
+      }
+
+      return clamp((component.vz - 1) / 23, 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "rz") {
+        component.rz = value;
+        return;
+      }
+
+      component.vz = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "vz";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam = component.activeEditableParam === "rz" ? "vz" : "rz";
+      return true;
+    },
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
@@ -586,6 +643,19 @@ function getComponentWheelDisplay(component) {
       component.activeEditableParam === "vt"
         ? formatEngineeringValueFixed(component.vt, "V", 1)
         : formatEngineeringValueFixed(component.k, "A/V²", 1)
+    );
+    return {
+      parameter,
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "zener_diode") {
+    const parameter = component.activeEditableParam === "rz" ? "Rz" : "Vz";
+    const valueAndUnit = splitWheelValueAndUnit(
+      component.activeEditableParam === "rz"
+        ? formatEngineeringValueFixed(component.rz, "Ω", 1)
+        : formatEngineeringValueFixed(component.vz, "V", 1)
     );
     return {
       parameter,

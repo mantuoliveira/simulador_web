@@ -71,6 +71,20 @@ function evaluateDiodeModel(component, voltage) {
   return evaluateJunctionModel(def?.model || {}, voltage);
 }
 
+function evaluateZenerModel(component, voltage) {
+  const zenerVoltage = Math.max(0, Math.abs(component?.vz ?? 5.1));
+  const dynamicResistance = safeResistance(component?.rz ?? 10);
+
+  if (voltage <= -zenerVoltage) {
+    return {
+      current: (voltage + zenerVoltage) / dynamicResistance,
+      conductance: 1 / dynamicResistance,
+    };
+  }
+
+  return evaluateDiodeModel(component, voltage);
+}
+
 function evaluateForwardOnlyJunctionModel(model, voltage) {
   if (voltage <= 0) {
     return { current: 0, conductance: 0 };
@@ -571,6 +585,20 @@ function buildDiodeSvg(options = {}) {
   </svg>`;
 }
 
+function buildZenerDiodeSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="0" y1="40" x2="42" y2="40" fill="none"/>
+      <line x1="100" y1="40" x2="160" y2="40" fill="none"/>
+      <polygon points="42,16 42,64 100,40" fill="none"/>
+      <line x1="100" y1="16" x2="100" y2="64" fill="none"/>
+      <line x1="100" y1="64" x2="108" y2="64" fill="none"/>
+      <line x1="92" y1="16" x2="100" y2="16" fill="none"/>
+    </g>
+  </svg>`;
+}
+
 function buildMosfetNSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
@@ -709,6 +737,7 @@ export {
   safeMosfetThreshold,
   evaluateJunctionModel,
   evaluateDiodeModel,
+  evaluateZenerModel,
   evaluateForwardOnlyJunctionModel,
   evaluateBjtSaturationFactor,
   evaluateBjtCoreModel,
@@ -743,6 +772,7 @@ export {
   buildVoltageNodeSvg,
   buildOpAmpSvg,
   buildDiodeSvg,
+  buildZenerDiodeSvg,
   buildMosfetNSvg,
   buildMosfetPSvg,
   buildBjtSvg,

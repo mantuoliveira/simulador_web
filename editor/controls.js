@@ -6,7 +6,7 @@ import {
   LIGHT_THEME,
   isGroundReferencedVoltageSourceComponent,
 } from "../core/constants.js";
-import { getFootprintExtents } from "../core/model.js";
+import { getComponentCollisionExtents } from "../core/model.js";
 import {
   appEls,
   clearSelectionState,
@@ -425,7 +425,7 @@ function buildAutoGroundCandidates(targetPosition) {
     const keyValue = `${x},${y},${rotation}`;
     if (seen.has(keyValue)) return;
 
-    const footprint = getFootprintExtents({ type: "ground", rotation });
+    const footprint = getComponentCollisionExtents({ type: "ground", rotation });
     const minX = visible.minX - searchMargin;
     const maxX = visible.maxX + searchMargin;
     const minY = visible.minY - searchMargin;

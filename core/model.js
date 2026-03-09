@@ -235,7 +235,24 @@ function getFootprintExtents(component) {
     up: def.footprintHalf.y,
     down: def.footprintHalf.y,
   };
-  const rotation = normalizeRotation(component.rotation);
+  return rotateCardinalExtents(extents, component.rotation);
+}
+
+function getComponentCollisionExtents(component) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def) return { left: 1, right: 1, up: 1, down: 1 };
+
+  const extents = def.collisionBounds || def.footprintExtents || {
+    left: def.footprintHalf?.x ?? 1,
+    right: def.footprintHalf?.x ?? 1,
+    up: def.footprintHalf?.y ?? 1,
+    down: def.footprintHalf?.y ?? 1,
+  };
+  return rotateCardinalExtents(extents, component.rotation);
+}
+
+function rotateCardinalExtents(extents, rotationDeg) {
+  const rotation = normalizeRotation(rotationDeg);
 
   if (rotation === 90) {
     return {
@@ -268,38 +285,13 @@ function getFootprintExtents(component) {
 }
 
 function getComponentBodyBounds(component) {
-  const def = COMPONENT_DEFS[component.type];
-  if (!def) {
-    return {
-      left: component.x,
-      right: component.x,
-      top: component.y,
-      bottom: component.y,
-    };
-  }
-
-  const offsetY = def.bodyOffsetY || 0;
-  const corners = [
-    rotateOffset(-def.bodyHalfW, -def.bodyHalfH + offsetY, component.rotation),
-    rotateOffset(def.bodyHalfW, -def.bodyHalfH + offsetY, component.rotation),
-    rotateOffset(def.bodyHalfW, def.bodyHalfH + offsetY, component.rotation),
-    rotateOffset(-def.bodyHalfW, def.bodyHalfH + offsetY, component.rotation),
-  ];
-
-  const xs = corners.map((corner) => component.x + corner.x);
-  const ys = corners.map((corner) => component.y + corner.y);
-  return {
-    left: Math.min(...xs),
-    right: Math.max(...xs),
-    top: Math.min(...ys),
-    bottom: Math.max(...ys),
-  };
+  return getComponentRenderBounds(component);
 }
 
 function getComponentRenderBounds(component) {
   const def = COMPONENT_DEFS[component.type];
   if (!def) {
-    return getComponentBodyBounds(component);
+    return getComponentCollisionBounds(component);
   }
 
   if (def.renderBounds) {
@@ -323,12 +315,12 @@ function getComponentRenderBounds(component) {
   const renderW = def.renderW || 0;
   const renderH = def.renderH || 0;
   if (renderW <= 0 || renderH <= 0) {
-    const footprint = getFootprintExtents(component);
+    const collision = getComponentCollisionExtents(component);
     return {
-      left: component.x - footprint.left,
-      right: component.x + footprint.right,
-      top: component.y - footprint.up,
-      bottom: component.y + footprint.down,
+      left: component.x - collision.left,
+      right: component.x + collision.right,
+      top: component.y - collision.up,
+      bottom: component.y + collision.down,
     };
   }
 
@@ -353,9 +345,19 @@ function getComponentRenderBounds(component) {
   };
 }
 
+function getComponentCollisionBounds(component) {
+  const collision = getComponentCollisionExtents(component);
+  return {
+    left: component.x - collision.left,
+    right: component.x + collision.right,
+    top: component.y - collision.up,
+    bottom: component.y + collision.down,
+  };
+}
+
 function componentsOverlap(a, b, padding = 0) {
-  const fa = getFootprintExtents(a);
-  const fb = getFootprintExtents(b);
+  const fa = getComponentCollisionExtents(a);
+  const fb = getComponentCollisionExtents(b);
 
   const aLeft = a.x - fa.left;
   const aRight = a.x + fa.right;
@@ -372,6 +374,18 @@ function componentsOverlap(a, b, padding = 0) {
     aRight + padding > bLeft &&
     aTop < bBottom + padding &&
     aBottom + padding > bTop
+  );
+}
+
+function componentsCollisionBoundsOverlap(a, b, padding = 0) {
+  const boundsA = getComponentCollisionBounds(a);
+  const boundsB = getComponentCollisionBounds(b);
+
+  return (
+    boundsA.left < boundsB.right + padding &&
+    boundsA.right + padding > boundsB.left &&
+    boundsA.top < boundsB.bottom + padding &&
+    boundsA.bottom + padding > boundsB.top
   );
 }
 
@@ -455,16 +469,41 @@ function worldToLocal(component, worldX, worldY) {
 }
 
 function pointInsideComponentBody(component, worldX, worldY) {
-  const def = COMPONENT_DEFS[component.type];
   const local = worldToLocal(component, worldX, worldY);
-  const offsetY = def.bodyOffsetY || 0;
+  const bounds = getLocalRenderBounds(component);
 
   return (
-    local.x >= -def.bodyHalfW &&
-    local.x <= def.bodyHalfW &&
-    local.y >= -def.bodyHalfH + offsetY &&
-    local.y <= def.bodyHalfH + offsetY
+    local.x >= -bounds.left &&
+    local.x <= bounds.right &&
+    local.y >= -bounds.up &&
+    local.y <= bounds.down
   );
+}
+
+function getLocalRenderBounds(component) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def) {
+    return { left: 0, right: 0, up: 0, down: 0 };
+  }
+
+  if (def.renderBounds) {
+    return def.renderBounds;
+  }
+
+  const renderW = def.renderW || 0;
+  const renderH = def.renderH || 0;
+  if (renderW <= 0 || renderH <= 0) {
+    return getComponentCollisionExtents(component);
+  }
+
+  const offsetX = def.renderOffsetX || 0;
+  const offsetY = def.renderOffsetY || 0;
+  return {
+    left: renderW * 0.5 - offsetX,
+    right: renderW * 0.5 + offsetX,
+    up: renderH * 0.5 - offsetY,
+    down: renderH * 0.5 + offsetY,
+  };
 }
 
 function getObstacleCells(component) {
@@ -504,15 +543,19 @@ export {
   getCardinalValueLabelAnchor,
   getReverseCardinalValueLabelAnchor,
   getFootprintExtents,
+  getComponentCollisionExtents,
   getComponentBodyBounds,
   getComponentRenderBounds,
+  getComponentCollisionBounds,
   componentsOverlap,
+  componentsCollisionBoundsOverlap,
   componentsRenderBoundsOverlap,
   componentsBodiesOverlap,
   getWireTerminalPositionsForComponents,
   pointOnOrthogonalSegment,
   snapPointToSegment,
   worldToLocal,
+  getLocalRenderBounds,
   pointInsideComponentBody,
   getObstacleCells,
 };

@@ -8,13 +8,13 @@ import {
 import { state } from "../runtime/state.js";
 import {
   edgeKey,
-  getFootprintExtents,
+  getComponentCollisionBounds,
+  getComponentCollisionExtents,
   getTerminalPositionForComponents,
   key,
   manhattan,
   parsePathStateKey,
   pathStateKey,
-  rotateOffset,
   stepDirection,
 } from "../core/model.js";
 
@@ -50,11 +50,11 @@ function routeBoundsForComponents(components, start, end) {
   let maxY = Math.max(start.y, end.y);
 
   for (const component of components) {
-    const fp = getFootprintExtents(component);
-    minX = Math.min(minX, Math.floor(component.x - fp.left - COMPONENT_ROUTE_MARGIN));
-    maxX = Math.max(maxX, Math.ceil(component.x + fp.right + COMPONENT_ROUTE_MARGIN));
-    minY = Math.min(minY, Math.floor(component.y - fp.up - COMPONENT_ROUTE_MARGIN));
-    maxY = Math.max(maxY, Math.ceil(component.y + fp.down + COMPONENT_ROUTE_MARGIN));
+    const collision = getComponentCollisionExtents(component);
+    minX = Math.min(minX, Math.floor(component.x - collision.left - COMPONENT_ROUTE_MARGIN));
+    maxX = Math.max(maxX, Math.ceil(component.x + collision.right + COMPONENT_ROUTE_MARGIN));
+    minY = Math.min(minY, Math.floor(component.y - collision.up - COMPONENT_ROUTE_MARGIN));
+    maxY = Math.max(maxY, Math.ceil(component.y + collision.down + COMPONENT_ROUTE_MARGIN));
   }
 
   return {
@@ -136,7 +136,7 @@ function buildBlockedCellSetForComponents(components, start, end) {
   const blocked = new Set();
 
   for (const component of components) {
-    const cells = getObstacleCells(component);
+    const cells = getCollisionObstacleCells(component);
     for (const cell of cells) {
       blocked.add(key(cell.x, cell.y));
     }
@@ -329,14 +329,41 @@ function simplifyOrthogonalPath(path) {
   return simplified;
 }
 
-function getObstacleCells(component) {
-  const def = COMPONENT_DEFS[component.type];
-  const cells = [];
-  for (const base of def.obstacleCells) {
-    const rotated = rotateOffset(base[0], base[1], component.rotation);
-    cells.push({ x: component.x + rotated.x, y: component.y + rotated.y });
+function getCollisionObstacleCells(component) {
+  const bounds = getComponentCollisionBounds(component);
+  const cells = new Map();
+
+  const minX = Math.ceil(bounds.left + 0.5);
+  const maxX = Math.floor(bounds.right - 0.5);
+  const minY = Math.ceil(bounds.top + 0.5);
+  const maxY = Math.floor(bounds.bottom - 0.5);
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      cells.set(key(x, y), { x, y });
+    }
   }
-  return cells;
+
+  const def = COMPONENT_DEFS[component.type];
+  for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
+    const terminal = getTerminalPositionForComponents([component], component.id, terminalIndex);
+    if (!terminal) continue;
+
+    const dx = terminal.x - component.x;
+    const dy = terminal.y - component.y;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      for (let y = minY; y <= maxY; y += 1) {
+        cells.delete(key(terminal.x, y));
+      }
+      continue;
+    }
+
+    for (let x = minX; x <= maxX; x += 1) {
+      cells.delete(key(x, terminal.y));
+    }
+  }
+
+  return [...cells.values()];
 }
 
 function sameGridPoint(a, b) {
@@ -372,7 +399,7 @@ export {
   buildTerminalProximitySet,
   rebuildPath,
   simplifyOrthogonalPath,
-  getObstacleCells,
+  getCollisionObstacleCells,
   sameGridPoint,
   clonePoint,
   clonePath,
