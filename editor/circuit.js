@@ -1517,8 +1517,51 @@ function selectTerminalLabel(terminalRef) {
 function selectNodeMarker(root, terminalRef = null) {
   clearSelectionState();
   state.selectedNodeMarkerRoot = root;
-  state.selectedNodeMarkerTerminal = terminalRef ? cloneTerminalRef(terminalRef) : null;
+  if (terminalRef) {
+    state.selectedNodeMarkerTerminal = cloneTerminalRef(terminalRef);
+  } else {
+    const marker = state.simulationResult?.ok
+      ? state.simulationResult.data.nodeMarkers.find((candidate) => candidate.root === root) || null
+      : null;
+    state.selectedNodeMarkerTerminal = marker?.anchorTerminal
+      ? cloneTerminalRef(marker.anchorTerminal)
+      : null;
+  }
   updateSelectionUi();
+}
+
+function cycleNodeMarkerAnchor(root) {
+  if (!state.simulationActive || !state.simulationResult?.ok) {
+    return false;
+  }
+
+  const marker =
+    state.simulationResult.data.nodeMarkers.find((candidate) => candidate.root === root) || null;
+  const candidates = Array.isArray(marker?.terminals) ? marker.terminals : [];
+  if (!candidates.length) {
+    selectNodeMarker(root);
+    return false;
+  }
+
+  const currentRef = state.nodeMarkerTerminalByRoot.get(root) || marker.anchorTerminal || candidates[0];
+  let currentIndex = candidates.findIndex((candidate) => terminalRefsEqual(candidate, currentRef));
+  if (currentIndex < 0) {
+    currentIndex = 0;
+  }
+
+  const nextRef = cloneTerminalRef(candidates[(currentIndex + 1) % candidates.length]);
+  state.nodeMarkerTerminalByRoot.set(root, nextRef);
+  const result = runSimulation();
+  state.simulationResult = buildStoredSimulationResult(result);
+  if (!result.ok) {
+    clearSimulationState();
+    setSimulationButtonState(false);
+    updateSelectionUi();
+    showStatus(result.message || "Erro na simulação", true);
+    return false;
+  }
+  selectNodeMarker(root, nextRef);
+  return true;
 }
 
 function clearSelection() {
@@ -1810,6 +1853,18 @@ function clearInvalidSelectionsInCircuit(circuit) {
     ) {
       circuit.selectedNodeMarkerTerminal = null;
       changed = true;
+    } else if (
+      circuit.selectedNodeMarkerRoot != null &&
+      circuit.simulationResult?.ok &&
+      circuit.simulationResult.data.rootByTerminal?.get(
+        terminalKey(
+          circuit.selectedNodeMarkerTerminal.componentId,
+          circuit.selectedNodeMarkerTerminal.terminalIndex
+        )
+      ) !== circuit.selectedNodeMarkerRoot
+    ) {
+      circuit.selectedNodeMarkerTerminal = null;
+      changed = true;
     }
   }
 
@@ -1844,6 +1899,24 @@ function clearInvalidSelectionsInCircuit(circuit) {
         if (validRoots.has(root)) continue;
         circuit.defaultHiddenNodeMarkerRoots.delete(root);
       }
+    }
+  }
+
+  if (circuit.nodeMarkerTerminalByRoot instanceof Map && circuit.simulationResult?.ok) {
+    const validRoots = new Set(circuit.simulationResult.data.nodeMarkers.map((marker) => marker.root));
+    for (const [root, terminalRef] of [...circuit.nodeMarkerTerminalByRoot.entries()]) {
+      if (
+        validRoots.has(root) &&
+        terminalRef &&
+        circuit.simulationResult.data.rootByTerminal?.get(
+          terminalKey(terminalRef.componentId, terminalRef.terminalIndex)
+        ) === root
+      ) {
+        continue;
+      }
+
+      circuit.nodeMarkerTerminalByRoot.delete(root);
+      changed = true;
     }
   }
 
@@ -2639,6 +2712,7 @@ export {
   selectWire,
   selectTerminalLabel,
   selectNodeMarker,
+  cycleNodeMarkerAnchor,
   clearSelection,
   removeComponent,
   removeWire,

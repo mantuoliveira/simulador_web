@@ -20,6 +20,7 @@ const state = {
   simulationActive: false,
   simulationResult: null,
   thermalModeActive: false,
+  nodeMarkerTerminalByRoot: new Map(),
   hiddenNodeMarkerRoots: new Set(),
   defaultHiddenNodeMarkerRoots: new Set(),
   preferredComponentRotations: new Map(),
@@ -79,6 +80,9 @@ function clearSimulationState(circuit = state) {
   circuit.simulationActive = false;
   circuit.simulationResult = null;
   circuit.thermalModeActive = false;
+  if (circuit.nodeMarkerTerminalByRoot instanceof Map) {
+    circuit.nodeMarkerTerminalByRoot.clear();
+  }
 
   if (circuit.hiddenNodeMarkerRoots instanceof Set) {
     circuit.hiddenNodeMarkerRoots.clear();

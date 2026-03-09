@@ -39,9 +39,10 @@ import {
   getMosfetDrainSourceTerminalIndices,
   getOpAmpInputTerminalIndices,
   getTerminalPositionForComponents,
-  key,
+  parseTerminalKey,
   terminalKey,
   clonePoint,
+  cloneTerminalRef,
 } from "../core/model.js";
 import {
   getReachabilityTerminalPairs,
@@ -50,7 +51,12 @@ import {
 
 const IMPLICIT_GROUND_ROOT = "__implicit_ground__";
 
-function simulateCircuit({ components, wires, previousSolution = null }) {
+function simulateCircuit({
+  components,
+  wires,
+  previousSolution = null,
+  nodeMarkerTerminalByRoot = null,
+}) {
   if (components.length === 0) {
     return { ok: false, message: "Adicione componentes antes de simular" };
   }
@@ -292,19 +298,26 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const markerGroups = new Map();
   for (const [terminal, root] of rootByTerminal.entries()) {
     if (!nodeVoltageByRoot.has(root)) continue;
-    pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal));
+    pushNodeMarkerGroupPoint(
+      markerGroups,
+      root,
+      terminalPosition.get(terminal),
+      parseTerminalKey(terminal)
+    );
   }
 
   const nodeMarkers = [];
   for (const [root, group] of markerGroups.entries()) {
-    const markerPoint = chooseNodeMarkerAnchor(group.points);
-    if (!markerPoint) continue;
+    const markerAnchor = chooseNodeMarkerAnchor(group, nodeMarkerTerminalByRoot?.get(root) ?? null);
+    if (!markerAnchor) continue;
 
     nodeMarkers.push({
       root,
-      x: markerPoint.x,
-      y: markerPoint.y,
+      x: markerAnchor.point.x,
+      y: markerAnchor.point.y,
       voltage: nodeVoltageByRoot.get(root) ?? 0,
+      anchorTerminal: cloneTerminalRef(markerAnchor.terminalRef),
+      terminals: group.terminals.map(({ terminalRef }) => cloneTerminalRef(terminalRef)),
     });
   }
 
@@ -329,6 +342,7 @@ function runSimulation(circuit = state) {
     components: circuit.components,
     wires: circuit.wires,
     previousSolution: circuit.simulationResult?.data?.solutionVector,
+    nodeMarkerTerminalByRoot: circuit.nodeMarkerTerminalByRoot,
   });
   return result;
 }
@@ -347,46 +361,52 @@ function getComponentTerminalRoots(component, rootByTerminal) {
   return roots;
 }
 
-function pushNodeMarkerGroupPoint(groups, root, point) {
-  if (!root || !point) return;
+function pushNodeMarkerGroupPoint(groups, root, point, terminalRef) {
+  if (!root || !point || !terminalRef) return;
 
   let group = groups.get(root);
   if (!group) {
     group = {
-      points: [],
-      pointKeys: new Set(),
+      terminals: [],
+      terminalKeys: new Set(),
     };
     groups.set(root, group);
   }
 
-  const pointKeyValue = key(point.x, point.y);
-  if (!group.pointKeys.has(pointKeyValue)) {
-    group.pointKeys.add(pointKeyValue);
-    group.points.push(clonePoint(point));
-  }
+  const refKey = terminalKey(terminalRef.componentId, terminalRef.terminalIndex);
+  if (group.terminalKeys.has(refKey)) return;
+
+  group.terminalKeys.add(refKey);
+  group.terminals.push({
+    terminalRef: cloneTerminalRef(terminalRef),
+    point: clonePoint(point),
+  });
 }
 
-function dedupeMarkerPoints(points) {
-  const unique = [];
-  const seen = new Set();
-
-  for (const point of points) {
-    if (!point) continue;
-
-    const pointKeyValue = key(point.x, point.y);
-    if (seen.has(pointKeyValue)) continue;
-
-    seen.add(pointKeyValue);
-    unique.push(clonePoint(point));
-  }
-
-  return unique;
-}
-
-function chooseNodeMarkerAnchor(points) {
-  const candidates = dedupeMarkerPoints(points);
+function chooseNodeMarkerAnchor(group, preferredTerminalRef = null) {
+  const candidates = Array.isArray(group?.terminals) ? group.terminals : [];
   if (!candidates.length) return null;
-  return candidates[0];
+
+  if (preferredTerminalRef) {
+    const preferredKey = terminalKey(
+      preferredTerminalRef.componentId,
+      preferredTerminalRef.terminalIndex
+    );
+    const preferredCandidate = candidates.find(
+      ({ terminalRef }) => terminalKey(terminalRef.componentId, terminalRef.terminalIndex) === preferredKey
+    );
+    if (preferredCandidate) {
+      return {
+        point: clonePoint(preferredCandidate.point),
+        terminalRef: cloneTerminalRef(preferredCandidate.terminalRef),
+      };
+    }
+  }
+
+  return {
+    point: clonePoint(candidates[0].point),
+    terminalRef: cloneTerminalRef(candidates[0].terminalRef),
+  };
 }
 
 function buildLinearMnaSystem(
@@ -1214,7 +1234,6 @@ export {
   runSimulation,
   getComponentTerminalRoots,
   pushNodeMarkerGroupPoint,
-  dedupeMarkerPoints,
   chooseNodeMarkerAnchor,
   buildLinearMnaSystem,
   solveNonlinearCircuit,

@@ -16,6 +16,7 @@ import {
   clearSelection,
   clientToCanvas,
   clientToWorld,
+  cycleNodeMarkerAnchor,
   getComponentById,
   handleTerminalTap,
   handleWireTap,
@@ -42,6 +43,13 @@ import {
 
 // Pointer, touch, zoom, and wheel interaction handlers.
 
+const nodeMarkerTapState = {
+  lastTimestamp: 0,
+  lastScreenX: 0,
+  lastScreenY: 0,
+  lastRoot: null,
+};
+
 function setupCanvasGestures() {
   appEls.canvas.addEventListener(
     "touchstart",
@@ -50,12 +58,13 @@ function setupCanvasGestures() {
 
       if (event.touches.length >= 2) {
         clearEmptyCanvasTapHistory();
+        clearNodeMarkerTapHistory();
         startPinch(event.touches);
         return;
       }
 
       if (event.touches.length === 1) {
-        startSingleTouch(event.touches[0]);
+        startSingleTouch(event.touches[0], event.timeStamp || Date.now());
       }
     },
     { passive: false }
@@ -151,6 +160,7 @@ function setupCanvasGestures() {
           if (wasTap) {
             const worldPoint = screenToWorld(tapPoint.x, tapPoint.y);
             if (isCanvasPointEmpty(worldPoint.x, worldPoint.y, TOUCH_TERMINAL_HIT_RADIUS)) {
+              clearNodeMarkerTapHistory();
               registerEmptyCanvasTap(
                 tapPoint.x,
                 tapPoint.y,
@@ -176,6 +186,7 @@ function setupCanvasGestures() {
       state.pointer.emptyTapCandidate = false;
       clearComponentTapCandidate();
       clearEmptyCanvasTapHistory();
+      clearNodeMarkerTapHistory();
     },
     { passive: false }
   );
@@ -198,6 +209,7 @@ function setupCanvasGestures() {
         return;
       }
 
+      clearNodeMarkerTapHistory();
       if (!pickNodeMarker(canvasPoint.x, canvasPoint.y) && isCanvasPointEmpty(point.x, point.y, MOUSE_TERMINAL_HIT_RADIUS)) {
         clearSelection();
       }
@@ -259,7 +271,9 @@ function setupCanvasGestures() {
       event.preventDefault();
 
       const canvasPoint = clientToCanvas(event.clientX, event.clientY);
-      if (pickNodeMarker(canvasPoint.x, canvasPoint.y)) {
+      const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
+      if (nodeMarkerHit) {
+        cycleNodeMarkerAnchor(nodeMarkerHit.root);
         return;
       }
 
@@ -462,11 +476,12 @@ function finishGroupPressSelection() {
   toggleComponentInGroupSelection(componentId);
 }
 
-function startSingleTouch(touch) {
+function startSingleTouch(touch, timestamp = Date.now()) {
   const canvasPoint = clientToCanvas(touch.clientX, touch.clientY);
   const point = clientToWorld(touch.clientX, touch.clientY);
   if (state.groupSelectMode) {
     clearEmptyCanvasTapHistory();
+    clearNodeMarkerTapHistory();
     const groupSelectableComponent = pickGroupSelectableComponent(
       point.x,
       point.y,
@@ -490,10 +505,12 @@ function startSingleTouch(touch) {
   const nodeMarkerHit = pickNodeMarker(canvasPoint.x, canvasPoint.y);
   if (nodeMarkerHit) {
     clearEmptyCanvasTapHistory();
-    selectNodeMarker(nodeMarkerHit.root);
+    handleNodeMarkerTap(nodeMarkerHit, canvasPoint.x, canvasPoint.y, timestamp);
     state.pointer.mode = "none";
     return;
   }
+
+  clearNodeMarkerTapHistory();
 
   const terminalLabelHit = pickTerminalLabel(canvasPoint.x, canvasPoint.y);
   if (terminalLabelHit) {
@@ -712,6 +729,40 @@ function resetZoomToDefaultAtPoint(screenX, screenY) {
 
 function clearEmptyCanvasTapHistory() {
   emptyCanvasTapState.lastTimestamp = 0;
+}
+
+function clearNodeMarkerTapHistory() {
+  nodeMarkerTapState.lastTimestamp = 0;
+  nodeMarkerTapState.lastRoot = null;
+}
+
+function handleNodeMarkerTap(marker, screenX, screenY, timestamp = Date.now()) {
+  const isDoubleTap =
+    marker?.root != null &&
+    nodeMarkerTapState.lastRoot === marker.root &&
+    timestamp - nodeMarkerTapState.lastTimestamp <= DOUBLE_TAP_MAX_DELAY_MS &&
+    distance(
+      screenX,
+      screenY,
+      nodeMarkerTapState.lastScreenX,
+      nodeMarkerTapState.lastScreenY
+    ) <= DOUBLE_TAP_MAX_DISTANCE_PX;
+
+  nodeMarkerTapState.lastTimestamp = timestamp;
+  nodeMarkerTapState.lastScreenX = screenX;
+  nodeMarkerTapState.lastScreenY = screenY;
+  nodeMarkerTapState.lastRoot = marker?.root ?? null;
+
+  if (isDoubleTap) {
+    clearNodeMarkerTapHistory();
+    if (!cycleNodeMarkerAnchor(marker.root)) {
+      selectNodeMarker(marker.root);
+    }
+    return true;
+  }
+
+  selectNodeMarker(marker.root);
+  return false;
 }
 
 function registerEmptyCanvasTap(screenX, screenY, timestamp = Date.now()) {
