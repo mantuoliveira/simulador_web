@@ -34,10 +34,8 @@ import {
   getBjtCollectorEmitterTerminalIndices,
   getMosfetDrainSourceTerminalIndices,
   getOpAmpInputTerminalIndices,
-  getTerminalLabelDirectionForComponents,
   getTerminalPositionForComponents,
   key,
-  parseTerminalKey,
   terminalKey,
   clonePoint,
 } from "../core/model.js";
@@ -271,33 +269,12 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const markerGroups = new Map();
   for (const [terminal, root] of rootByTerminal.entries()) {
     if (!nodeVoltageByRoot.has(root)) continue;
-    const ref = parseTerminalKey(terminal);
-    const labelDirection = ref
-      ? getTerminalLabelDirectionForComponents(components, ref.componentId, ref.terminalIndex)
-      : null;
-    pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal), labelDirection);
+    pushNodeMarkerGroupPoint(markerGroups, root, terminalPosition.get(terminal));
   }
-
-  for (const wire of wires) {
-    if (!Array.isArray(wire.path) || wire.path.length === 0) continue;
-
-    const fromRoot = rootByTerminal.get(terminalKey(wire.from.componentId, wire.from.terminalIndex));
-    const toRoot = rootByTerminal.get(terminalKey(wire.to.componentId, wire.to.terminalIndex));
-    if (!fromRoot || fromRoot !== toRoot || !nodeVoltageByRoot.has(fromRoot)) continue;
-
-    for (const point of wire.path) {
-      pushNodeMarkerGroupPoint(markerGroups, fromRoot, point);
-    }
-  }
-
-  const groundMarkerPoints = dedupeMarkerPoints(
-    groundTerminals.map((terminal) => terminalPosition.get(terminal))
-  );
 
   const nodeMarkers = [];
   for (const [root, group] of markerGroups.entries()) {
-    const markerPoints = root === groundRoot && groundMarkerPoints.length ? groundMarkerPoints : group.points;
-    const markerPoint = chooseNodeMarkerAnchor(group.points, markerPoints, group.pointDirections);
+    const markerPoint = chooseNodeMarkerAnchor(group.points);
     if (!markerPoint) continue;
 
     nodeMarkers.push({
@@ -305,7 +282,6 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       x: markerPoint.x,
       y: markerPoint.y,
       voltage: nodeVoltageByRoot.get(root) ?? 0,
-      labelDirection: markerPoint.labelDirection,
     });
   }
 
@@ -348,7 +324,7 @@ function getComponentTerminalRoots(component, rootByTerminal) {
   return roots;
 }
 
-function pushNodeMarkerGroupPoint(groups, root, point, labelDirection = null) {
+function pushNodeMarkerGroupPoint(groups, root, point) {
   if (!root || !point) return;
 
   let group = groups.get(root);
@@ -356,7 +332,6 @@ function pushNodeMarkerGroupPoint(groups, root, point, labelDirection = null) {
     group = {
       points: [],
       pointKeys: new Set(),
-      pointDirections: new Map(),
     };
     groups.set(root, group);
   }
@@ -366,15 +341,6 @@ function pushNodeMarkerGroupPoint(groups, root, point, labelDirection = null) {
     group.pointKeys.add(pointKeyValue);
     group.points.push(clonePoint(point));
   }
-
-  if (!labelDirection) return;
-
-  let directions = group.pointDirections.get(pointKeyValue);
-  if (!directions) {
-    directions = new Set();
-    group.pointDirections.set(pointKeyValue, directions);
-  }
-  directions.add(labelDirection);
 }
 
 function dedupeMarkerPoints(points) {
@@ -394,81 +360,10 @@ function dedupeMarkerPoints(points) {
   return unique;
 }
 
-function chooseNodeMarkerAnchor(geometryPoints, candidatePoints = geometryPoints, pointDirections = new Map()) {
-  const geometry = dedupeMarkerPoints(geometryPoints);
-  const candidates = dedupeMarkerPoints(candidatePoints);
-  if (!geometry.length || !candidates.length) return null;
-
-  const centroid = geometry.reduce(
-    (acc, point) => ({
-      x: acc.x + point.x,
-      y: acc.y + point.y,
-    }),
-    { x: 0, y: 0 }
-  );
-  centroid.x /= geometry.length;
-  centroid.y /= geometry.length;
-
-  let bestPoint = candidates[0];
-  let bestDistance = distanceSquared(bestPoint, centroid);
-
-  for (let index = 1; index < candidates.length; index += 1) {
-    const candidate = candidates[index];
-    const candidateDistance = distanceSquared(candidate, centroid);
-
-    if (
-      candidateDistance < bestDistance - 1e-9 ||
-      (Math.abs(candidateDistance - bestDistance) <= 1e-9 && isBetterMarkerTieBreak(candidate, bestPoint))
-    ) {
-      bestPoint = candidate;
-      bestDistance = candidateDistance;
-    }
-  }
-
-  return {
-    x: bestPoint.x,
-    y: bestPoint.y,
-    labelDirection: chooseNodeMarkerLabelDirection(bestPoint, pointDirections),
-  };
-}
-
-function distanceSquared(a, b) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function isBetterMarkerTieBreak(candidate, currentBest) {
-  if (candidate.y !== currentBest.y) {
-    return candidate.y < currentBest.y;
-  }
-
-  return candidate.x < currentBest.x;
-}
-
-function chooseNodeMarkerLabelDirection(point, pointDirections) {
-  const directions = pointDirections.get(key(point.x, point.y));
-  if (!directions || directions.size === 0) {
-    return "up";
-  }
-
-  if (directions.has("down") && !directions.has("up")) {
-    return "down";
-  }
-
-  if (directions.has("up") && !directions.has("down")) {
-    return "up";
-  }
-
-  if (directions.has("right") && !directions.has("left")) {
-    return "right";
-  }
-
-  if (directions.has("left") && !directions.has("right")) {
-    return "left";
-  }
-
-  return "up";
+function chooseNodeMarkerAnchor(points) {
+  const candidates = dedupeMarkerPoints(points);
+  if (!candidates.length) return null;
+  return candidates[0];
 }
 
 function buildLinearMnaSystem(activeComponents, voltageSources, opAmps, rootByTerminal, getNodeIdx, nodeCount) {
@@ -1188,9 +1083,6 @@ export {
   pushNodeMarkerGroupPoint,
   dedupeMarkerPoints,
   chooseNodeMarkerAnchor,
-  distanceSquared,
-  isBetterMarkerTieBreak,
-  chooseNodeMarkerLabelDirection,
   buildLinearMnaSystem,
   solveNonlinearCircuit,
   runNewtonIterations,

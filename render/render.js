@@ -1,7 +1,9 @@
 import {
   BJT_BASE_TERMINAL_INDEX,
   COMPONENT_DEFS,
+  DARK_THEME,
   IDLE_FRAME_MS,
+  LIGHT_THEME,
   RESISTOR_THERMAL_BUCKET_COUNT,
   RESISTOR_THERMAL_RATED_POWER_W,
 } from "../core/constants.js";
@@ -15,11 +17,11 @@ import {
   getCardinalValueLabelAnchor,
   getComponentRenderBounds,
   getOpAmpInputTerminalIndices,
+  terminalKey,
 } from "../core/model.js";
 import {
   clamp,
   degToRad,
-  distanceToSegment,
   formatCurrent,
   formatPower,
   formatVoltage,
@@ -32,6 +34,7 @@ import {
   spriteMap,
   state,
   themePalette,
+  themeState,
   wheelState,
   getRenderSpriteMap,
   getRenderThemePalette,
@@ -559,6 +562,18 @@ function drawSimulationAnnotations(renderTarget, data) {
     );
     context.fill();
 
+    context.lineWidth = 1.4;
+    context.strokeStyle = getNodeMarkerBorderColor();
+    roundedRect(
+      context,
+      metrics.boxX,
+      metrics.boxY,
+      metrics.boxW,
+      metrics.boxH,
+      metrics.cornerRadius
+    );
+    context.stroke();
+
     if (state.selectedNodeMarkerRoot === marker.root) {
       context.lineWidth = 2;
       context.strokeStyle = palette.canvasSelection;
@@ -595,20 +610,18 @@ function getNodeMarkerRenderMetrics(renderTarget, marker) {
   const font = `${fontPx}px "Avenir Next", sans-serif`;
   const padX = clamp(fontPx * 0.58, 7, 14);
   const padY = clamp(fontPx * 0.35, 4, 10);
-  const gap = clamp(fontPx * 0.66, 8, 16);
   const cornerRadius = clamp(fontPx * 0.5, 8, 14);
 
   context.font = font;
   const textW = context.measureText(label).width;
   const boxW = textW + padX * 2;
   const boxH = fontPx + padY * 2;
-  const placement = chooseNodeMarkerPlacement(renderTarget, sp, boxW, boxH, marker.labelDirection, gap);
+  const placement = getNodeMarkerPlacement(sp, boxW, boxH);
 
   return {
     label,
     font,
     cornerRadius,
-    labelDirection: placement.labelDirection,
     boxW,
     boxH,
     boxX: placement.boxX,
@@ -618,7 +631,28 @@ function getNodeMarkerRenderMetrics(renderTarget, marker) {
   };
 }
 
-function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up", gap = 8) {
+function getNodeMarkerBorderColor() {
+  if (themeState.mode === LIGHT_THEME) {
+    return "rgba(226, 232, 240, 0.78)";
+  }
+
+  if (themeState.mode === DARK_THEME) {
+    return "rgba(51, 65, 85, 0.78)";
+  }
+
+  return "rgba(148, 163, 184, 0.72)";
+}
+
+function getNodeMarkerPlacement(screenPoint, boxW, boxH) {
+  return {
+    boxX: screenPoint.x - boxW * 0.5,
+    boxY: screenPoint.y - boxH * 0.5,
+    textX: screenPoint.x,
+    textY: screenPoint.y,
+  };
+}
+
+function getDirectionalLabelPlacement(screenPoint, boxW, boxH, labelDirection = "up", gap = 8) {
   if (labelDirection === "down") {
     return {
       boxX: screenPoint.x - boxW * 0.5,
@@ -654,159 +688,6 @@ function getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection = "up", 
   };
 }
 
-function chooseNodeMarkerPlacement(renderTarget, screenPoint, boxW, boxH, preferredDirection = "up", gap = 8) {
-  const directions = getNodeMarkerCandidateDirections(preferredDirection);
-  const gapCandidates = getNodeMarkerGapCandidates(gap, boxW, boxH);
-  let bestPlacement = null;
-  let bestScore = null;
-
-  for (let index = 0; index < directions.length; index += 1) {
-    const labelDirection = directions[index];
-    for (let gapIndex = 0; gapIndex < gapCandidates.length; gapIndex += 1) {
-      const candidateGap = gapCandidates[gapIndex];
-      const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection, candidateGap);
-      const rect = {
-        x: placement.boxX,
-        y: placement.boxY,
-        width: boxW,
-        height: boxH,
-      };
-      const score = getNodeMarkerPlacementScore(renderTarget, rect, index, gapIndex);
-
-      if (!bestScore || isBetterNodeMarkerPlacementScore(score, bestScore)) {
-        bestPlacement = {
-          ...placement,
-          labelDirection,
-        };
-        bestScore = score;
-      }
-    }
-  }
-
-  return (
-    bestPlacement || {
-      ...getNodeMarkerPlacement(screenPoint, boxW, boxH, preferredDirection, gap),
-      labelDirection: preferredDirection,
-    }
-  );
-}
-
-function getNodeMarkerCandidateDirections(preferredDirection = "up") {
-  const ordered = [preferredDirection, "up", "down", "right", "left"];
-  return [...new Set(ordered.filter(Boolean))];
-}
-
-function getNodeMarkerGapCandidates(baseGap, boxW, boxH) {
-  return [
-    baseGap,
-    baseGap + clamp(boxH * 0.75, 8, 20),
-    baseGap + clamp(Math.max(boxW, boxH) * 0.45, 18, 40),
-    baseGap + worldLengthToScreen(1),
-    baseGap + worldLengthToScreen(2),
-    baseGap + worldLengthToScreen(3),
-    baseGap + worldLengthToScreen(4),
-  ].filter((gap, index, values) => values.findIndex((value) => Math.abs(value - gap) < 1e-9) === index);
-}
-
-function getNodeMarkerPlacementScore(renderTarget, rect, directionOrder, gapOrder = 0) {
-  const collisionRect = expandRect(rect, Math.max(3, Math.max(2.1, state.camera.zoom * 2.4) * 0.5 + 2));
-  const preferredClearance = Math.max(10, state.camera.zoom * 10);
-  let componentOverlaps = 0;
-  let componentProximityPenalty = 0;
-  let wireOverlaps = 0;
-  let wireProximityPenalty = 0;
-
-  for (const component of state.components) {
-    const componentRect = getComponentScreenRect(component);
-    if (!componentRect) continue;
-
-    if (rectsIntersect(collisionRect, componentRect)) {
-      componentOverlaps += 1;
-      continue;
-    }
-
-    const distance = distanceRectToRect(collisionRect, componentRect);
-    if (distance < preferredClearance) {
-      componentProximityPenalty += preferredClearance - distance;
-    }
-  }
-
-  for (const wire of state.wires) {
-    if (!isWireVisible(wire)) continue;
-
-    for (let index = 1; index < wire.path.length; index += 1) {
-      const start = worldToScreen(wire.path[index - 1].x, wire.path[index - 1].y);
-      const end = worldToScreen(wire.path[index].x, wire.path[index].y);
-
-      if (segmentIntersectsRect(start, end, collisionRect)) {
-        wireOverlaps += 1;
-        continue;
-      }
-
-      const distance = distanceSegmentToRect(start, end, collisionRect);
-      if (distance < preferredClearance) {
-        wireProximityPenalty += preferredClearance - distance;
-      }
-    }
-  }
-
-  return {
-    componentOverlaps,
-    wireOverlaps,
-    overflowPenalty: getRectOverflowPenalty(rect, renderTarget.width, renderTarget.height),
-    componentProximityPenalty,
-    wireProximityPenalty,
-    directionOrder,
-    gapOrder,
-  };
-}
-
-function isBetterNodeMarkerPlacementScore(candidate, currentBest) {
-  if (candidate.componentOverlaps !== currentBest.componentOverlaps) {
-    return candidate.componentOverlaps < currentBest.componentOverlaps;
-  }
-
-  if (candidate.wireOverlaps !== currentBest.wireOverlaps) {
-    return candidate.wireOverlaps < currentBest.wireOverlaps;
-  }
-
-  if (Math.abs(candidate.overflowPenalty - currentBest.overflowPenalty) > 1e-9) {
-    return candidate.overflowPenalty < currentBest.overflowPenalty;
-  }
-
-  if (candidate.gapOrder !== currentBest.gapOrder) {
-    return candidate.gapOrder < currentBest.gapOrder;
-  }
-
-  if (Math.abs(candidate.componentProximityPenalty - currentBest.componentProximityPenalty) > 1e-9) {
-    return candidate.componentProximityPenalty < currentBest.componentProximityPenalty;
-  }
-
-  if (Math.abs(candidate.wireProximityPenalty - currentBest.wireProximityPenalty) > 1e-9) {
-    return candidate.wireProximityPenalty < currentBest.wireProximityPenalty;
-  }
-
-  return candidate.directionOrder < currentBest.directionOrder;
-}
-
-function getRectOverflowPenalty(rect, width, height) {
-  return (
-    Math.max(0, -rect.x) +
-    Math.max(0, -rect.y) +
-    Math.max(0, rect.x + rect.width - width) +
-    Math.max(0, rect.y + rect.height - height)
-  );
-}
-
-function expandRect(rect, padding) {
-  return {
-    x: rect.x - padding,
-    y: rect.y - padding,
-    width: rect.width + padding * 2,
-    height: rect.height + padding * 2,
-  };
-}
-
 function getComponentScreenRect(component) {
   const bounds = getComponentRenderBounds(component);
   if (!bounds) return null;
@@ -821,108 +702,6 @@ function getComponentScreenRect(component) {
   };
 }
 
-function rectsIntersect(a, b) {
-  return (
-    a.x < b.x + b.width &&
-    a.x + a.width > b.x &&
-    a.y < b.y + b.height &&
-    a.y + a.height > b.y
-  );
-}
-
-function segmentIntersectsRect(start, end, rect) {
-  if (pointInRect(start.x, start.y, rect) || pointInRect(end.x, end.y, rect)) {
-    return true;
-  }
-
-  const topLeft = { x: rect.x, y: rect.y };
-  const topRight = { x: rect.x + rect.width, y: rect.y };
-  const bottomLeft = { x: rect.x, y: rect.y + rect.height };
-  const bottomRight = { x: rect.x + rect.width, y: rect.y + rect.height };
-
-  return (
-    segmentsIntersect(start, end, topLeft, topRight) ||
-    segmentsIntersect(start, end, topRight, bottomRight) ||
-    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
-    segmentsIntersect(start, end, bottomLeft, topLeft)
-  );
-}
-
-function pointInRect(x, y, rect) {
-  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
-}
-
-function segmentsIntersect(a, b, c, d) {
-  const o1 = orientation(a, b, c);
-  const o2 = orientation(a, b, d);
-  const o3 = orientation(c, d, a);
-  const o4 = orientation(c, d, b);
-
-  if (o1 !== o2 && o3 !== o4) {
-    return true;
-  }
-
-  if (o1 === 0 && pointOnCollinearSegment(a, c, b)) return true;
-  if (o2 === 0 && pointOnCollinearSegment(a, d, b)) return true;
-  if (o3 === 0 && pointOnCollinearSegment(c, a, d)) return true;
-  if (o4 === 0 && pointOnCollinearSegment(c, b, d)) return true;
-  return false;
-}
-
-function orientation(a, b, c) {
-  const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
-  if (Math.abs(value) <= 1e-9) return 0;
-  return value > 0 ? 1 : 2;
-}
-
-function pointOnCollinearSegment(a, b, c) {
-  return (
-    b.x >= Math.min(a.x, c.x) - 1e-9 &&
-    b.x <= Math.max(a.x, c.x) + 1e-9 &&
-    b.y >= Math.min(a.y, c.y) - 1e-9 &&
-    b.y <= Math.max(a.y, c.y) + 1e-9
-  );
-}
-
-function distanceSegmentToRect(start, end, rect) {
-  if (segmentIntersectsRect(start, end, rect)) {
-    return 0;
-  }
-
-  const corners = [
-    { x: rect.x, y: rect.y },
-    { x: rect.x + rect.width, y: rect.y },
-    { x: rect.x, y: rect.y + rect.height },
-    { x: rect.x + rect.width, y: rect.y + rect.height },
-  ];
-
-  let minDistance = Math.min(
-    distancePointToRect(start.x, start.y, rect),
-    distancePointToRect(end.x, end.y, rect)
-  );
-
-  for (const corner of corners) {
-    minDistance = Math.min(
-      minDistance,
-      distanceToSegment(corner.x, corner.y, start.x, start.y, end.x, end.y)
-    );
-  }
-
-  return minDistance;
-}
-
-function distancePointToRect(x, y, rect) {
-  const dx = Math.max(rect.x - x, 0, x - (rect.x + rect.width));
-  const dy = Math.max(rect.y - y, 0, y - (rect.y + rect.height));
-  return Math.hypot(dx, dy);
-}
-
-function distanceRectToRect(a, b) {
-  const dx = Math.max(a.x - (b.x + b.width), b.x - (a.x + a.width), 0);
-  const dy = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height), 0);
-  return Math.hypot(dx, dy);
-}
-
 function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalIndex, label }) {
   const terminalPosition = getTerminalPosition(componentId, terminalIndex);
   if (!terminalPosition || !label) return null;
@@ -934,7 +713,7 @@ function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalInde
   const padX = 8;
   const boxW = textLayout.totalWidth + padX * 2;
   const boxH = textLayout.boxHeight;
-  const placement = getNodeMarkerPlacement(screenPoint, boxW, boxH, labelDirection);
+  const placement = getDirectionalLabelPlacement(screenPoint, boxW, boxH, labelDirection);
 
   return {
     label,
@@ -1159,23 +938,10 @@ export {
   drawSimulationAnnotations,
   getCurrentArrowTerminalPair,
   getNodeMarkerRenderMetrics,
+  getNodeMarkerBorderColor,
   getNodeMarkerPlacement,
-  chooseNodeMarkerPlacement,
-  getNodeMarkerCandidateDirections,
-  getNodeMarkerPlacementScore,
-  isBetterNodeMarkerPlacementScore,
-  getRectOverflowPenalty,
-  expandRect,
+  getDirectionalLabelPlacement,
   getComponentScreenRect,
-  rectsIntersect,
-  segmentIntersectsRect,
-  pointInRect,
-  segmentsIntersect,
-  orientation,
-  pointOnCollinearSegment,
-  distanceSegmentToRect,
-  distancePointToRect,
-  distanceRectToRect,
   getTerminalLabelRenderMetrics,
   parseTerminalLabelText,
   getTerminalLabelTextLayout,
