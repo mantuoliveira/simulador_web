@@ -510,8 +510,8 @@ button.secondary.danger {
   position: fixed;
   right: 14px;
   bottom: calc(var(--bottom-h) + 10px);
-  width: 132px;
-  height: 132px;
+  width: 264px;
+  height: 264px;
   border-radius: 50%;
   z-index: 19;
   touch-action: none;
@@ -555,37 +555,69 @@ button.secondary.danger {
   background: var(--wheel-center-bg);
   border: 1px solid var(--wheel-center-border);
   display: grid;
+  grid-auto-rows: min-content;
   align-content: center;
   justify-items: center;
+  row-gap: 3px;
   text-align: center;
   padding: 8px;
   box-shadow: var(--wheel-center-shadow);
 }
 
 #wheel-title {
-  font-size: 0.66rem;
+  font-size: 1.2rem;
   color: var(--muted-soft);
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 #wheel-value {
-  font-size: 0.82rem;
+  font-size: 2rem;
   color: var(--ink);
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.18;
+  white-space: pre-line;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+#wheel-unit {
+  font-size: 1.2rem;
+  color: var(--muted-soft);
+  font-weight: 700;
+  line-height: 1;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .hidden {
   display: none !important;
 }
 
-@media (max-width: 420px) {
+@media (pointer: coarse) and (max-width: 520px) {
   .comp-btn {
     width: 76px;
   }
 
   #value-wheel {
-    width: 118px;
-    height: 118px;
+    width: 177px;
+    height: 177px;
+  }
+
+  .wheel-center {
+    inset: 14%;
+    padding: 4px;
+    row-gap: 2px;
+  }
+
+  #wheel-value {
+    font-size: 2rem;
+  }
+
+  #wheel-title,
+  #wheel-unit {
+    font-size: 1.2rem;
   }
 }

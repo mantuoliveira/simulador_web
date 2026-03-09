@@ -45,6 +45,8 @@ const state = {
     emptyTapCandidate: false,
     tapStartScreenX: 0,
     tapStartScreenY: 0,
+    tapComponentId: null,
+    tapStartedSelectedComponent: false,
   },
 };
 
@@ -107,6 +109,7 @@ const appEls = {
   wheelPointer: document.querySelector(".wheel-pointer"),
   wheelValue: document.getElementById("wheel-value"),
   wheelTitle: document.getElementById("wheel-title"),
+  wheelUnit: document.getElementById("wheel-unit"),
   terminalLabelModal: document.getElementById("terminal-label-modal"),
   terminalLabelForm: document.getElementById("terminal-label-form"),
   terminalLabelInput: document.getElementById("terminal-label-input"),

@@ -14,10 +14,13 @@ import {
   normalizeRotation,
 } from "../core/support.js";
 import {
-  formatComponentValue,
+  applyNormalizedValueToComponent,
+  getComponentWheelDisplay,
   getComponentBehavior,
   getDefaultComponentRotation,
   rememberComponentRotation,
+  resetEditableParameter,
+  toggleEditableParameter,
 } from "../core/behaviors.js";
 import {
   appEls,
@@ -1356,9 +1359,27 @@ function toggleGroupSelectionMode() {
 }
 
 function selectComponent(componentId) {
+  const previousSelectedComponentId = state.selectedComponentId;
   clearSelectionState();
   state.selectedComponentId = componentId;
+  if (previousSelectedComponentId !== componentId) {
+    resetEditableParameter(getComponentById(componentId));
+  }
   updateSelectionUi();
+}
+
+function toggleSelectedEditableParameter() {
+  const component = getComponentById(state.selectedComponentId);
+  if (!component || !COMPONENT_DEFS[component.type]?.editable) {
+    return false;
+  }
+
+  if (!toggleEditableParameter(component)) {
+    return false;
+  }
+
+  updateSelectionUi();
+  return true;
 }
 
 function selectWire(wireId) {
@@ -1926,7 +1947,7 @@ function deriveSelectionUiState() {
   }
 
   uiState.showValueWheel = true;
-  uiState.wheelTitle = def.label;
+  uiState.wheelTitle = "";
   uiState.syncWheel = true;
   return uiState;
 }
@@ -1991,9 +2012,12 @@ function syncWheelWithSelectedComponent() {
   const component = getComponentById(state.selectedComponentId);
   if (!component) return;
   const normalized = normalizedFromValue(component);
+  const wheelDisplay = getComponentWheelDisplay(component);
   const angleDeg = normalized * 360 - 90;
   appEls.wheelPointer.style.transform = `translate(0, -50%) rotate(${angleDeg}deg)`;
-  appEls.wheelValue.textContent = formatComponentValue(component);
+  appEls.wheelTitle.textContent = wheelDisplay.parameter;
+  appEls.wheelValue.textContent = wheelDisplay.value;
+  appEls.wheelUnit.textContent = wheelDisplay.unit;
 }
 
 function updateValueFromWheelPointer(clientX, clientY) {
@@ -2022,8 +2046,7 @@ function updateValueFromWheelPointer(clientX, clientY) {
     normalized = wheelState.activeNormalized;
   }
 
-  const value = valueFromNormalized(component.type, normalized);
-  component.value = value;
+  applyNormalizedValueToComponent(component, normalized);
   syncWheelWithSelectedComponent();
   onCircuitChanged();
 }
@@ -2038,8 +2061,8 @@ function getWheelNormalizedAtClientPoint(clientX, clientY) {
   return normalized;
 }
 
-function valueFromNormalized(type, normalized) {
-  return getComponentBehavior(type).valueFromNormalized(normalized);
+function valueFromNormalized(component, normalized) {
+  return getComponentBehavior(component.type).valueFromNormalized(component, normalized);
 }
 
 function normalizedFromValue(component) {
@@ -2492,6 +2515,7 @@ export {
   setGroupSelectionMode,
   toggleGroupSelectionMode,
   selectComponent,
+  toggleSelectedEditableParameter,
   selectWire,
   selectTerminalLabel,
   selectNodeMarker,

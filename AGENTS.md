@@ -1,50 +1,61 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a static web app served directly from the project root. `index.html` defines the shell and the script load order, and `styles.css` contains layout and visual styles. The runtime is split across focused browser scripts:
+This repository is a static browser app served directly from the project root. `index.html` defines the shell and loads a single ESM entrypoint, `app-bootstrap.js`. `styles.css` contains layout and visual styles. Runtime code is organized by domain:
 
-- `app-core.js`: constants, component definitions, and domain behavior metadata.
-- `app-support.js`: math, formatting, SVG builders, and shared low-level helpers.
-- `app-render.js`: theme rendering, sprites, canvas drawing, and render loop helpers.
-- `app-runtime.js`: app state, DOM element lookup, theme palette state, and canvas setup.
-- `app-controls.js`: top bar / bottom bar actions, keyboard shortcuts, and editor commands.
-- `app-interaction.js`: pointer, touch, pinch, zoom, and wheel interaction handling.
-- `app.js`: circuit editing, selection, topology changes, and shared editor utilities.
-- `app-routing.js`: orthogonal wire routing.
-- `app-simulation.js`: DC solver and simulation annotations.
-- `app-export.js`: PNG export and native share flow.
-- `app-bootstrap.js`: final boot sequence; keep this file thin.
+- `app-bootstrap.js`: thin browser entrypoint; keep it limited to boot delegation.
+- `bootstrap/bootstrap.js`: startup orchestration.
+- `core/constants.js`: shared constants, component metadata, and solver limits.
+- `core/behaviors.js`: per-component behavior, value logic, and SVG assembly.
+- `core/model.js`: pure geometry, ids, terminal helpers, and footprint math.
+- `core/support.js`: pure math, formatting, SVG, and solver support helpers.
+- `runtime/state.js`: global mutable runtime state, DOM references, render targets, and theme holders.
+- `runtime/ui.js`: theme application, sprite creation, component strip, and canvas sizing.
+- `runtime/viewport.js`: screen/world coordinate transforms.
+- `render/render.js`: canvas drawing, render scheduling, and service worker registration.
+- `editor/ui.js`: button state and transient UI feedback helpers.
+- `editor/selectors.js`: read-only selectors over `state`.
+- `editor/circuit.js`: circuit mutation, selection, topology updates, and editor orchestration.
+- `editor/controls.js`: bottom-bar actions, keyboard shortcuts, modal flows, and top-level commands.
+- `editor/interactions.js`: pointer, touch, wheel, pan, drag, and pinch handling.
+- `editor/routing.js`: orthogonal wire routing and path cost logic.
+- `simulation/solver.js`: MNA/DC solver, nonlinear devices, and simulation annotations.
+- `export/png.js`: PNG export and native share handling.
 
-PWA files live beside the app entry points: `service-worker.js`, `manifest.webmanifest`, and `icon.svg`. `README.md` documents local usage and features. Keep related runtime files in the root unless a new folder adds a clear boundary.
+PWA assets live in the root: `service-worker.js`, `manifest.webmanifest`, and `icon.svg`. `README.md` documents usage. `docs/refactor-notes.md` is the quick source of truth for load order and invariants.
 
 ## Navigation Shortcuts
-- Start with `index.html` to confirm script order before moving functions between files.
-- Use `docs/refactor-notes.md` as the quick source of truth for load order and refactor invariants.
-- For visual bugs, check `styles.css`, then `app-render.js`, then `app-runtime.js`.
-- For interaction bugs, check `app-interaction.js` first, then `app-controls.js`, then `app.js`.
-- For circuit mutation or selection bugs, check `app.js` first.
-- For route/path issues, check `app-routing.js`.
-- For solver or annotation issues, check `app-simulation.js`.
-- For export-only issues, check `app-export.js`.
-- When a change adds or renames a browser-loaded asset, update `service-worker.js`.
+- Start with `index.html` to confirm the entrypoint and static DOM ids.
+- Use `docs/refactor-notes.md` before moving symbols across modules.
+- For visual bugs, check `styles.css`, then `render/render.js`, then `runtime/ui.js`.
+- For theme or sprite issues, check `runtime/ui.js` first.
+- For state shape or shared runtime holders, check `runtime/state.js`.
+- For interaction bugs, check `editor/interactions.js`, then `editor/controls.js`, then `editor/circuit.js`.
+- For circuit mutation, selection, rerouting, or topology cleanup, check `editor/circuit.js` first.
+- For route/path issues, check `editor/routing.js`.
+- For simulation or annotation issues, check `simulation/solver.js`.
+- For export-only issues, check `export/png.js`.
+- When a browser-loaded asset is added, removed, or renamed, update `service-worker.js`.
 
 ## Build, Test, and Development Commands
-There is no bundler, compile step, or dependency installation step for the app itself. The Python command below is only a convenient static file server.
+There is no bundler, compile step, or dependency install step for the app itself.
 
 - `python3 -m http.server 8080` serves the app locally at `http://localhost:8080/index.html`.
 - `python3 -m http.server 8080 --bind 0.0.0.0` exposes the app on the local network for phone or tablet testing.
-- `git diff -- index.html styles.css app-core.js app-support.js app-runtime.js app-controls.js app-render.js app-interaction.js app.js app-routing.js app-simulation.js app-export.js app-bootstrap.js service-worker.js` is the quickest review pass before committing UI or simulation changes.
+- `git diff -- index.html styles.css app-bootstrap.js bootstrap/bootstrap.js core/constants.js core/behaviors.js core/model.js core/support.js runtime/state.js runtime/ui.js runtime/viewport.js render/render.js editor/ui.js editor/selectors.js editor/circuit.js editor/controls.js editor/interactions.js editor/routing.js simulation/solver.js export/png.js service-worker.js README.md docs/refactor-notes.md` is the quickest review pass before committing UI or simulation changes.
 
 ## Coding Style & Naming Conventions
-Use 2-space indentation in HTML, CSS, and JavaScript. Follow the existing JavaScript style: `const`/`let`, semicolons, uppercase snake case for shared constants (`GRID_SIZE`, `MAX_ZOOM`), and snake case identifiers for component keys such as `voltage_source`, `bjt_npn`, and `bjt_pnp`. Prefer small helper functions over repeated inline geometry or solver math. Keep user-facing labels and messages in Portuguese to match the current UI.
+Use 2-space indentation in HTML, CSS, and JavaScript. Follow the existing JavaScript style: `const`/`let`, semicolons, uppercase snake case for shared constants (`GRID_SIZE`, `MAX_ZOOM`), and snake case component keys such as `voltage_source`, `voltage_node`, `bjt_npn`, and `bjt_pnp`. Prefer small helpers over repeated inline geometry or solver math. Keep browser behavior dependency-free and preserve Portuguese for user-facing labels, messages, and controls.
 
 ## Testing Guidelines
-The repository currently has no automated test suite. Test changes manually in a browser after starting the local server: place components, connect wires, rotate or swap supported parts, run and pause the simulation, and reload once to verify offline caching still behaves correctly. If automated tests are added later, place them under `tests/` and use names ending in `.test.js`.
+There is no automated test suite yet. Test changes manually in a browser after starting the local server: add components, connect wires, move and rotate parts, create a tap on an existing wire, run and pause simulation, and reload once to verify offline caching still behaves correctly. If automated tests are added later, place them under `tests/` and use names ending in `.test.js`.
 
 Smoke checks worth running before finishing a refactor:
 
-- `node --check app-core.js app-support.js app-runtime.js app-controls.js app-render.js app-interaction.js app.js app-routing.js app-simulation.js app-export.js app-bootstrap.js service-worker.js`
+- `node --check app-bootstrap.js bootstrap/bootstrap.js core/constants.js core/behaviors.js core/model.js core/support.js runtime/state.js runtime/ui.js runtime/viewport.js render/render.js editor/ui.js editor/selectors.js editor/circuit.js editor/controls.js editor/interactions.js editor/routing.js simulation/solver.js export/png.js service-worker.js`
 - Open `index.html` and confirm the component strip renders and the canvas initializes.
+- Verify `Play/Pause` once after state or solver changes.
+- Verify export once after render or theme changes.
 
 ## Commit & Pull Request Guidelines
 Recent commits use short imperative subjects such as `Add desktop mouse panning` and `Prefer straighter wire routes`. Keep commit titles concise, present tense, and focused on one change. Pull requests should include a brief summary, manual test steps, and screenshots or a short recording for UI changes. When changing cached assets, update `CACHE_NAME` or the `ASSETS` list in `service-worker.js`.

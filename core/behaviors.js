@@ -4,6 +4,9 @@ import {
   BJT_MAX_BETA,
   BJT_MIN_BETA,
   COMPONENT_DEFS,
+  MOSFET_DRAIN_TERMINAL_INDEX,
+  MOSFET_GATE_TERMINAL_INDEX,
+  MOSFET_SOURCE_TERMINAL_INDEX,
   OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
   OP_AMP_MAX_SUPPLY,
   OP_AMP_MIN_SUPPLY,
@@ -19,12 +22,16 @@ import {
   buildDefaultComponentSvg,
   buildDiodeSvg,
   buildGroundSvg,
+  buildMosfetNSvg,
+  buildMosfetPSvg,
   buildOpAmpSvg,
   buildResistorSvg,
   buildVoltageNodeSvg,
   buildVoltageSourceSvg,
   clamp,
   formatCurrent,
+  formatEngineeringValueFixed,
+  formatTransconductance,
   formatResistance,
   formatSymmetricVoltage,
   formatVoltage,
@@ -36,6 +43,7 @@ import {
 import {
   getBjtCollectorEmitterTerminalIndices,
   getCardinalValueLabelAnchor,
+  getMosfetDrainSourceTerminalIndices,
   getOpAmpInputTerminalIndices,
   getReverseCardinalValueLabelAnchor,
 } from "./model.js";
@@ -44,8 +52,15 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
   createState: () => ({}),
   buildSvg: (options = {}) => buildDefaultComponentSvg(options),
   formatValue: () => "",
-  valueFromNormalized: () => 0,
+  formatWheelValue: (component) => DEFAULT_COMPONENT_BEHAVIOR.formatValue(component),
+  getWheelTitle: (component) => COMPONENT_DEFS[component?.type]?.label || "",
+  valueFromNormalized: (_component, _normalized) => 0,
   normalizedFromValue: () => 0,
+  setEditableValue(component, value) {
+    component.value = value;
+  },
+  resetEditableParameter: () => {},
+  toggleEditableParameter: () => false,
   getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
   isSimulatedBranch: false,
   getReachabilityTerminalPairs: () => [],
@@ -67,7 +82,9 @@ const COMPONENT_BEHAVIORS = {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildVoltageSourceSvg(options),
     formatValue: (component) => formatVoltage(component.value),
-    valueFromNormalized: (normalized) => roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
+    formatWheelValue: (component) => `V=${formatEngineeringValueFixed(component.value, "V", 1)}`,
+    valueFromNormalized: (_component, normalized) =>
+      roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
@@ -90,7 +107,9 @@ const COMPONENT_BEHAVIORS = {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildVoltageNodeSvg(options),
     formatValue: (component) => formatVoltage(component.value),
-    valueFromNormalized: (normalized) => roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
+    formatWheelValue: (component) => `V=${formatEngineeringValueFixed(component.value, "V", 1)}`,
+    valueFromNormalized: (_component, normalized) =>
+      roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
     getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 1.22),
     isSimulatedBranch: true,
@@ -100,7 +119,9 @@ const COMPONENT_BEHAVIORS = {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildCurrentSourceSvg(options),
     formatValue: (component) => formatCurrent(component.value),
-    valueFromNormalized: (normalized) => snapToStep(-0.1 + 0.2 * clamp(normalized, 0, 1), 0.001),
+    formatWheelValue: (component) => `I=${formatEngineeringValueFixed(component.value, "A", 1)}`,
+    valueFromNormalized: (_component, normalized) =>
+      snapToStep(-0.1 + 0.2 * clamp(normalized, 0, 1), 0.001),
     normalizedFromValue: (component) => clamp((component.value + 0.1) / 0.2, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.05),
     isSimulatedBranch: true,
@@ -117,7 +138,8 @@ const COMPONENT_BEHAVIORS = {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildResistorSvg(options),
     formatValue: (component) => formatResistance(component.value),
-    valueFromNormalized: (normalized) => {
+    formatWheelValue: (component) => `R=${formatEngineeringValueFixed(component.value, "Ω", 1)}`,
+    valueFromNormalized: (_component, normalized) => {
       const n = clamp(normalized, 0, 1);
       const exp = 6 * n;
       return quantizeResistor(Math.pow(10, exp));
@@ -148,7 +170,9 @@ const COMPONENT_BEHAVIORS = {
     createState: () => ({ inputsSwapped: false }),
     buildSvg: (options = {}) => buildOpAmpSvg(options),
     formatValue: (component) => formatSymmetricVoltage(component.value),
-    valueFromNormalized: (normalized) =>
+    formatWheelValue: (component) =>
+      `±${formatEngineeringValueFixed(Math.abs(component.value), "V", 1)}`,
+    valueFromNormalized: (_component, normalized) =>
       snapToStep(
         OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * clamp(normalized, 0, 1),
         OP_AMP_SUPPLY_STEP
@@ -190,12 +214,177 @@ const COMPONENT_BEHAVIORS = {
       textOffsetExtra: 0,
     }),
   },
+  mosfet_n: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      k: 0.01,
+      vt: 2,
+      activeEditableParam: "k",
+      drainSourceSwapped: false,
+    }),
+    buildSvg: (options = {}) => buildMosfetNSvg(options),
+    formatValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatVoltage(component.vt)}`
+        : `k=${formatTransconductance(component.k)}`,
+    formatWheelValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatEngineeringValueFixed(component.vt, "V", 1)}`
+        : `k=${formatEngineeringValueFixed(component.k, "A/V²", 1)}`,
+    getWheelTitle: () => "MOSFET N",
+    valueFromNormalized: (component, normalized) => {
+      const clamped = clamp(normalized, 0, 1);
+      if (component.activeEditableParam === "vt") {
+        return roundTo(0.5 + 4.5 * clamped, 2);
+      }
+
+      return roundTo(Math.pow(10, -3 + 2 * clamped), 6);
+    },
+    normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "vt") {
+        return clamp((component.vt - 0.5) / 4.5, 0, 1);
+      }
+
+      const safe = clamp(component.k, 0.001, 0.1);
+      return clamp((Math.log10(safe) + 3) / 2, 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "vt") {
+        component.vt = value;
+        return;
+      }
+
+      component.k = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "k";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam = component.activeEditableParam === "vt" ? "k" : "vt";
+      return true;
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: () => [],
+    getCurrentArrowTerminalPair: (component) => {
+      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
+      return [drainIndex, sourceIndex];
+    },
+    getCurrentArrowLayout: (_component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        geometry.baseTerminalPoint,
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.drainSourceSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar source e drain",
+      ariaLabel: "Trocar source e drain",
+      toggle(component) {
+        component.drainSourceSwapped = !component.drainSourceSwapped;
+        return "Source e drain trocados";
+      },
+    },
+  },
+  mosfet_p: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      k: 0.01,
+      vt: 2,
+      activeEditableParam: "k",
+      drainSourceSwapped: false,
+    }),
+    buildSvg: (options = {}) => buildMosfetPSvg(options),
+    formatValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatVoltage(component.vt)}`
+        : `k=${formatTransconductance(component.k)}`,
+    formatWheelValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatEngineeringValueFixed(component.vt, "V", 1)}`
+        : `k=${formatEngineeringValueFixed(component.k, "A/V²", 1)}`,
+    getWheelTitle: () => "MOSFET P",
+    valueFromNormalized: (component, normalized) => {
+      const clamped = clamp(normalized, 0, 1);
+      if (component.activeEditableParam === "vt") {
+        return roundTo(0.5 + 4.5 * clamped, 2);
+      }
+
+      return roundTo(Math.pow(10, -3 + 2 * clamped), 6);
+    },
+    normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "vt") {
+        return clamp((component.vt - 0.5) / 4.5, 0, 1);
+      }
+
+      const safe = clamp(component.k, 0.001, 0.1);
+      return clamp((Math.log10(safe) + 3) / 2, 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "vt") {
+        component.vt = value;
+        return;
+      }
+
+      component.k = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "k";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam = component.activeEditableParam === "vt" ? "k" : "vt";
+      return true;
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: () => [],
+    getCurrentArrowTerminalPair: (component) => {
+      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
+      return [drainIndex, sourceIndex];
+    },
+    getCurrentArrowLayout: (_component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        geometry.baseTerminalPoint,
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.drainSourceSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar source e drain",
+      ariaLabel: "Trocar source e drain",
+      toggle(component) {
+        component.drainSourceSwapped = !component.drainSourceSwapped;
+        return "Source e drain trocados";
+      },
+    },
+  },
   bjt_npn: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     createState: () => ({ collectorEmitterSwapped: false }),
     buildSvg: (options = {}) => buildBjtNpnSvg(options),
     formatValue: (component) => `β=${Math.round(component.value)}`,
-    valueFromNormalized: (normalized) =>
+    formatWheelValue: (component) => `β=${component.value.toFixed(1)}`,
+    valueFromNormalized: (_component, normalized) =>
       snapToStep(
         BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
         BJT_BETA_STEP
@@ -254,7 +443,8 @@ const COMPONENT_BEHAVIORS = {
     createState: () => ({ collectorEmitterSwapped: false }),
     buildSvg: (options = {}) => buildBjtPnpSvg(options),
     formatValue: (component) => `β=${Math.round(component.value)}`,
-    valueFromNormalized: (normalized) =>
+    formatWheelValue: (component) => `β=${component.value.toFixed(1)}`,
+    valueFromNormalized: (_component, normalized) =>
       snapToStep(
         BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
         BJT_BETA_STEP
@@ -346,6 +536,99 @@ function formatComponentValue(component) {
   return getComponentBehavior(component.type).formatValue(component);
 }
 
+function getComponentWheelDisplay(component) {
+  if (!component) {
+    return {
+      parameter: "",
+      value: "",
+      unit: "",
+    };
+  }
+
+  if (component.type === "voltage_source" || component.type === VOLTAGE_NODE_TYPE) {
+    const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "V", 1));
+    return {
+      parameter: "V",
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "current_source") {
+    const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "A", 1));
+    return {
+      parameter: "I",
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "resistor") {
+    const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "Ω", 1));
+    return {
+      parameter: "R",
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "op_amp") {
+    const valueAndUnit = splitWheelValueAndUnit(
+      formatEngineeringValueFixed(Math.abs(component.value), "V", 1)
+    );
+    return {
+      parameter: "V",
+      value: `±${valueAndUnit.value}`,
+      unit: valueAndUnit.unit,
+    };
+  }
+
+  if (component.type === "mosfet_n" || component.type === "mosfet_p") {
+    const parameter = component.activeEditableParam === "vt" ? "Vt" : "k";
+    const valueAndUnit = splitWheelValueAndUnit(
+      component.activeEditableParam === "vt"
+        ? formatEngineeringValueFixed(component.vt, "V", 1)
+        : formatEngineeringValueFixed(component.k, "A/V²", 1)
+    );
+    return {
+      parameter,
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "bjt_npn" || component.type === "bjt_pnp") {
+    return {
+      parameter: "β",
+      value: component.value.toFixed(1),
+      unit: "A/A",
+    };
+  }
+
+  const formatted = getComponentBehavior(component.type).formatWheelValue(component);
+  const valueAndUnit = splitWheelValueAndUnit(typeof formatted === "string" ? formatted : String(formatted));
+  return {
+    parameter: "",
+    ...valueAndUnit,
+  };
+}
+
+function formatComponentWheelValue(component) {
+  const { parameter, value, unit } = getComponentWheelDisplay(component);
+  return [parameter, value, unit].filter((line) => line !== "").join("\n");
+}
+
+function splitWheelValueAndUnit(formatted) {
+  const splitIndex = formatted.lastIndexOf(" ");
+  if (splitIndex <= 0) {
+    return {
+      value: formatted,
+      unit: "",
+    };
+  }
+
+  return {
+    value: formatted.slice(0, splitIndex),
+    unit: formatted.slice(splitIndex + 1),
+  };
+}
+
 function buildSvgForType(type, options = {}) {
   return getComponentBehavior(type).buildSvg(options);
 }
@@ -367,6 +650,26 @@ function getValueLabelAnchor(component) {
 
 function getCurrentArrowTerminalPair(component) {
   return getComponentBehavior(component.type).getCurrentArrowTerminalPair(component);
+}
+
+function getComponentWheelTitle(component) {
+  return getComponentBehavior(component.type).getWheelTitle(component);
+}
+
+function applyNormalizedValueToComponent(component, normalized) {
+  const behavior = getComponentBehavior(component.type);
+  const value = behavior.valueFromNormalized(component, normalized);
+  behavior.setEditableValue(component, value);
+}
+
+function resetEditableParameter(component) {
+  if (!component) return;
+  getComponentBehavior(component.type).resetEditableParameter(component);
+}
+
+function toggleEditableParameter(component) {
+  if (!component) return false;
+  return getComponentBehavior(component.type).toggleEditableParameter(component) === true;
 }
 
 function quantizeResistor(value) {
@@ -399,9 +702,15 @@ export {
   getDefaultComponentRotation,
   rememberComponentRotation,
   formatComponentValue,
+  formatComponentWheelValue,
+  getComponentWheelDisplay,
   buildSvgForType,
   isSimulatedBranchComponent,
   getReachabilityTerminalPairs,
   getValueLabelAnchor,
   getCurrentArrowTerminalPair,
+  getComponentWheelTitle,
+  applyNormalizedValueToComponent,
+  resetEditableParameter,
+  toggleEditableParameter,
 };

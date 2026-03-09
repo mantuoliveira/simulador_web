@@ -41,6 +41,16 @@ function safeBjtBeta(value) {
   return Math.max(1, value);
 }
 
+function safeMosfetTransconductance(value) {
+  if (!Number.isFinite(value)) return 0.01;
+  return Math.max(1e-9, value);
+}
+
+function safeMosfetThreshold(value) {
+  if (!Number.isFinite(value)) return 2;
+  return value;
+}
+
 function evaluateJunctionModel(model, voltage) {
   const saturationCurrent = model.saturationCurrent ?? 1e-12;
   const idealityFactor = model.idealityFactor ?? 1;
@@ -181,6 +191,74 @@ function evaluateOpAmpModel(component, differentialVoltage) {
   };
 }
 
+function evaluateMosfetModel(component, vgs, vds) {
+  if (component?.type === "mosfet_p") {
+    return evaluatePmosfetModel(component, vgs, vds);
+  }
+
+  const k = safeMosfetTransconductance(component?.k);
+  const vt = safeMosfetThreshold(component?.vt);
+
+  if (vgs <= vt || vds <= 0) {
+    return {
+      ids: 0,
+      dIds_dVg: 0,
+      dIds_dVd: 0,
+      dIds_dVs: 0,
+    };
+  }
+
+  const overdrive = vgs - vt;
+  if (vds < overdrive) {
+    return {
+      ids: 2 * k * (overdrive * vds - (vds * vds) / 2),
+      dIds_dVg: 2 * k * vds,
+      dIds_dVd: 2 * k * (overdrive - vds),
+      dIds_dVs: -2 * k * overdrive,
+    };
+  }
+
+  return {
+    ids: k * overdrive * overdrive,
+    dIds_dVg: 2 * k * overdrive,
+    dIds_dVd: 0,
+    dIds_dVs: -2 * k * overdrive,
+  };
+}
+
+function evaluatePmosfetModel(component, _vgs, _vds) {
+  const k = safeMosfetTransconductance(component?.k);
+  const vt = safeMosfetThreshold(component?.vt);
+  const vsg = -_vgs;
+  const vsd = -_vds;
+
+  if (vsg <= vt || vsd <= 0) {
+    return {
+      ids: 0,
+      dIds_dVg: 0,
+      dIds_dVd: 0,
+      dIds_dVs: 0,
+    };
+  }
+
+  const overdrive = vsg - vt;
+  if (vsd < overdrive) {
+    return {
+      ids: -2 * k * (overdrive * vsd - (vsd * vsd) / 2),
+      dIds_dVg: 2 * k * vsd,
+      dIds_dVd: 2 * k * (overdrive - vsd),
+      dIds_dVs: -2 * k * overdrive,
+    };
+  }
+
+  return {
+    ids: -k * overdrive * overdrive,
+    dIds_dVg: 2 * k * overdrive,
+    dIds_dVd: 0,
+    dIds_dVs: -2 * k * overdrive,
+  };
+}
+
 function normalizeRotation(rotation) {
   return ((rotation % 360) + 360) % 360;
 }
@@ -264,6 +342,30 @@ function formatEngineeringValue(value, unit, decimals = 2) {
   return `${roundTo(scaled, decimals)} ${prefixes.get(exponent)}${unit}`;
 }
 
+function formatEngineeringValueFixed(value, unit, decimals = 1) {
+  const safeDecimals = Math.max(0, decimals);
+  if (!Number.isFinite(value) || value === 0) {
+    return `${(0).toFixed(safeDecimals)} ${unit}`;
+  }
+
+  const prefixes = new Map([
+    [-12, "p"],
+    [-9, "n"],
+    [-6, "µ"],
+    [-3, "m"],
+    [0, ""],
+    [3, "k"],
+    [6, "M"],
+    [9, "G"],
+    [12, "T"],
+  ]);
+  const abs = Math.abs(value);
+  const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
+  const exponent = clamp(rawExponent, -12, 12);
+  const scaled = value / Math.pow(10, exponent);
+  return `${scaled.toFixed(safeDecimals)} ${prefixes.get(exponent)}${unit}`;
+}
+
 function formatVoltage(value) {
   return formatEngineeringValue(value, "V");
 }
@@ -274,6 +376,10 @@ function formatSymmetricVoltage(value) {
 
 function formatCurrent(value) {
   return formatEngineeringValue(value, "A");
+}
+
+function formatTransconductance(value) {
+  return formatEngineeringValue(value, "A/V²");
 }
 
 function formatPower(value) {
@@ -465,6 +571,38 @@ function buildDiodeSvg(options = {}) {
   </svg>`;
 }
 
+function buildMosfetNSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="80" x2="30" y2="80"/>
+      <line x1="30" y1="54" x2="30" y2="106"/>
+      <line x1="45" y1="34" x2="45" y2="126"/>
+      <line x1="80" y1="0" x2="80" y2="42"/>
+      <line x1="45" y1="42" x2="80" y2="42"/>
+      <line x1="80" y1="118" x2="80" y2="160"/>
+      <line x1="45" y1="118" x2="80" y2="118"/>
+      <polyline points="64,124 78,118 64,112"/>
+    </g>
+  </svg>`;
+}
+
+function buildMosfetPSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="80" x2="30" y2="80"/>
+      <line x1="30" y1="54" x2="30" y2="106"/>
+      <line x1="45" y1="34" x2="45" y2="126"/>
+      <line x1="80" y1="0" x2="80" y2="42"/>
+      <line x1="45" y1="42" x2="80" y2="42"/>
+      <line x1="80" y1="118" x2="80" y2="160"/>
+      <line x1="45" y1="118" x2="80" y2="118"/>
+      <polyline points="59,124 45,118 59,112"/>
+    </g>
+  </svg>`;
+}
+
 function buildBjtSvg(options = {}, emitterArrowDirection = "out") {
   const { stroke } = getSpriteThemeColors(options.palette);
   const branchStart = { x: 50, y: 80 };
@@ -567,6 +705,8 @@ export {
   safeResistance,
   safeOpAmpSupply,
   safeBjtBeta,
+  safeMosfetTransconductance,
+  safeMosfetThreshold,
   evaluateJunctionModel,
   evaluateDiodeModel,
   evaluateForwardOnlyJunctionModel,
@@ -574,6 +714,8 @@ export {
   evaluateBjtCoreModel,
   evaluateBjtModel,
   evaluateOpAmpModel,
+  evaluateMosfetModel,
+  evaluatePmosfetModel,
   normalizeRotation,
   degToRad,
   distance,
@@ -583,9 +725,11 @@ export {
   maxAbsValue,
   formatResistance,
   formatEngineeringValue,
+  formatEngineeringValueFixed,
   formatVoltage,
   formatSymmetricVoltage,
   formatCurrent,
+  formatTransconductance,
   formatPower,
   mixColors,
   roundedRect,
@@ -599,6 +743,8 @@ export {
   buildVoltageNodeSvg,
   buildOpAmpSvg,
   buildDiodeSvg,
+  buildMosfetNSvg,
+  buildMosfetPSvg,
   buildBjtSvg,
   buildBjtNpnSvg,
   buildBjtPnpSvg,

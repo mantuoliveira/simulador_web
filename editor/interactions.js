@@ -30,6 +30,7 @@ import {
   selectComponent,
   selectNodeMarker,
   selectTerminalLabel,
+  toggleSelectedEditableParameter,
   selectWire,
   toggleComponentInGroupSelection,
   tryMoveComponent,
@@ -113,10 +114,15 @@ function setupCanvasGestures() {
           (touch) => touch.identifier === state.pointer.activeTouchId
         );
         if (ended) {
+          const shouldToggle = shouldToggleSelectedComponentParameter();
           state.pointer.mode = "none";
           state.pointer.activeTouchId = null;
           state.pointer.dragComponentId = null;
           state.pointer.emptyTapCandidate = false;
+          clearComponentTapCandidate();
+          if (shouldToggle) {
+            toggleSelectedEditableParameter();
+          }
         }
         return;
       }
@@ -168,6 +174,7 @@ function setupCanvasGestures() {
       state.pointer.activeTouchId = null;
       state.pointer.dragComponentId = null;
       state.pointer.emptyTapCandidate = false;
+      clearComponentTapCandidate();
       clearEmptyCanvasTapHistory();
     },
     { passive: false }
@@ -220,11 +227,13 @@ function setupCanvasGestures() {
 
     const compHit = pickComponentBody(point.x, point.y);
     if (compHit) {
+      const wasSelected = state.selectedComponentId === compHit.id;
       selectComponent(compHit.id);
       state.pointer.mode = "mouse-drag";
       state.pointer.dragComponentId = compHit.id;
       state.pointer.dragOffsetX = point.x - compHit.x;
       state.pointer.dragOffsetY = point.y - compHit.y;
+      primeComponentTapCandidate(compHit.id, wasSelected, canvasPoint);
       return;
     }
 
@@ -278,6 +287,9 @@ function setupCanvasGestures() {
       const component = getComponentById(state.pointer.dragComponentId);
       if (!component) return;
 
+      const canvasPoint = clientToCanvas(event.clientX, event.clientY);
+      maybeClearComponentTapCandidate(canvasPoint);
+
       const point = clientToWorld(event.clientX, event.clientY);
       const targetX = Math.round(point.x - state.pointer.dragOffsetX);
       const targetY = Math.round(point.y - state.pointer.dragOffsetY);
@@ -302,7 +314,16 @@ function setupCanvasGestures() {
       return;
     }
 
-    if (state.pointer.mode === "mouse-drag" || state.pointer.mode === "mouse-pan") {
+    if (state.pointer.mode === "mouse-drag") {
+      const shouldToggle = shouldToggleSelectedComponentParameter();
+      finishPointerInteraction();
+      if (shouldToggle) {
+        toggleSelectedEditableParameter();
+      }
+      return;
+    }
+
+    if (state.pointer.mode === "mouse-pan") {
       finishPointerInteraction();
     }
   });
@@ -381,6 +402,7 @@ function finishPointerInteraction() {
   state.pointer.activeTouchId = null;
   state.pointer.dragComponentId = null;
   state.pointer.emptyTapCandidate = false;
+  clearComponentTapCandidate();
 }
 
 function pickGroupSelectableComponent(worldX, worldY, terminalThreshold) {
@@ -492,12 +514,14 @@ function startSingleTouch(touch) {
   const componentHit = pickComponentBody(point.x, point.y);
   if (componentHit) {
     clearEmptyCanvasTapHistory();
+    const wasSelected = state.selectedComponentId === componentHit.id;
     selectComponent(componentHit.id);
     state.pointer.mode = "drag";
     state.pointer.activeTouchId = touch.identifier;
     state.pointer.dragComponentId = componentHit.id;
     state.pointer.dragOffsetX = point.x - componentHit.x;
     state.pointer.dragOffsetY = point.y - componentHit.y;
+    primeComponentTapCandidate(componentHit.id, wasSelected, canvasPoint);
     return;
   }
 
@@ -522,6 +546,9 @@ function startSingleTouch(touch) {
 function moveDrag(touch) {
   const component = getComponentById(state.pointer.dragComponentId);
   if (!component) return;
+
+  const canvasPoint = clientToCanvas(touch.clientX, touch.clientY);
+  maybeClearComponentTapCandidate(canvasPoint);
 
   const point = clientToWorld(touch.clientX, touch.clientY);
   const targetX = Math.round(point.x - state.pointer.dragOffsetX);
@@ -549,6 +576,41 @@ function startPan(touch) {
   state.pointer.tapStartScreenX = point.x;
   state.pointer.tapStartScreenY = point.y;
   requestRender(true);
+}
+
+function primeComponentTapCandidate(componentId, wasSelected, canvasPoint) {
+  state.pointer.tapComponentId = componentId;
+  state.pointer.tapStartedSelectedComponent = wasSelected;
+  state.pointer.tapStartScreenX = canvasPoint.x;
+  state.pointer.tapStartScreenY = canvasPoint.y;
+}
+
+function clearComponentTapCandidate() {
+  state.pointer.tapComponentId = null;
+  state.pointer.tapStartedSelectedComponent = false;
+}
+
+function maybeClearComponentTapCandidate(canvasPoint) {
+  if (state.pointer.tapComponentId == null) return;
+
+  if (
+    distance(
+      canvasPoint.x,
+      canvasPoint.y,
+      state.pointer.tapStartScreenX,
+      state.pointer.tapStartScreenY
+    ) > EMPTY_TAP_MOVE_TOLERANCE_PX
+  ) {
+    clearComponentTapCandidate();
+  }
+}
+
+function shouldToggleSelectedComponentParameter() {
+  return (
+    state.pointer.tapComponentId != null &&
+    state.pointer.tapStartedSelectedComponent === true &&
+    state.selectedComponentId === state.pointer.tapComponentId
+  );
 }
 
 function movePan(touch) {

@@ -3,6 +3,9 @@ import {
   COMPONENT_DEFS,
   MAX_BJT_JUNCTION_VOLTAGE_STEP,
   MAX_DIODE_VOLTAGE_STEP,
+  MOSFET_DRAIN_TERMINAL_INDEX,
+  MOSFET_GATE_TERMINAL_INDEX,
+  MOSFET_SOURCE_TERMINAL_INDEX,
   NEWTON_BACKTRACK_STEPS,
   NEWTON_CONSTRAINT_RESIDUAL_TOLERANCE,
   NEWTON_KCL_RESIDUAL_TOLERANCE,
@@ -13,12 +16,14 @@ import {
   isBjtComponentType,
   isGroundReferencedVoltageSourceComponent,
   isIdealVoltageSourceComponent,
+  isMosfetComponentType,
 } from "../core/constants.js";
 import {
   DisjointSet,
   clamp,
   evaluateBjtModel,
   evaluateDiodeModel,
+  evaluateMosfetModel,
   evaluateOpAmpModel,
   maxAbsValue,
   multiplyMatrixVector,
@@ -27,6 +32,7 @@ import {
 import { state } from "../runtime/state.js";
 import {
   getBjtCollectorEmitterTerminalIndices,
+  getMosfetDrainSourceTerminalIndices,
   getOpAmpInputTerminalIndices,
   getTerminalLabelDirectionForComponents,
   getTerminalPositionForComponents,
@@ -156,6 +162,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   );
   const diodes = activeComponents.filter((component) => component.type === "diode");
   const bjts = activeComponents.filter((component) => isBjtComponentType(component));
+  const mosfets = activeComponents.filter((component) => isMosfetComponentType(component));
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
 
   const N = nonGroundRoots.length;
@@ -182,12 +189,13 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   );
 
   let solution = null;
-  if (diodes.length > 0 || bjts.length > 0 || opAmps.length > 0) {
+  if (diodes.length > 0 || bjts.length > 0 || mosfets.length > 0 || opAmps.length > 0) {
     solution = solveNonlinearCircuit({
       baseMatrix: linearSystem.A,
       baseVector: linearSystem.z,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount: N,
       opAmpRowOffset: N + M,
@@ -244,6 +252,15 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       const vCollector = nodeVoltageByRoot.get(rCollector) ?? 0;
       const vEmitter = nodeVoltageByRoot.get(rEmitter) ?? 0;
       componentCurrents.set(component.id, evaluateBjtModel(component, vBase - vEmitter, vBase - vCollector).ic);
+    } else if (isMosfetComponentType(component)) {
+      const rGate = rootByTerminal.get(terminalKey(component.id, MOSFET_GATE_TERMINAL_INDEX));
+      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
+      const rDrain = rootByTerminal.get(terminalKey(component.id, drainIndex));
+      const rSource = rootByTerminal.get(terminalKey(component.id, sourceIndex));
+      const vGate = nodeVoltageByRoot.get(rGate) ?? 0;
+      const vDrain = nodeVoltageByRoot.get(rDrain) ?? 0;
+      const vSource = nodeVoltageByRoot.get(rSource) ?? 0;
+      componentCurrents.set(component.id, evaluateMosfetModel(component, vGate - vSource, vDrain - vSource).ids);
     }
   }
 
@@ -519,6 +536,7 @@ function solveNonlinearCircuit({
   baseVector,
   diodes,
   bjts,
+  mosfets,
   opAmps,
   nodeCount,
   opAmpRowOffset,
@@ -537,6 +555,7 @@ function solveNonlinearCircuit({
       baseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -556,6 +575,7 @@ function solveNonlinearCircuit({
       baseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -583,6 +603,7 @@ function solveNonlinearCircuit({
       scaledBaseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -600,6 +621,7 @@ function solveNonlinearCircuit({
           scaledBaseVector,
           diodes,
           bjts,
+          mosfets,
           opAmps,
           nodeCount,
           opAmpRowOffset,
@@ -628,6 +650,7 @@ function solveNonlinearCircuit({
     baseVector,
     diodes,
     bjts,
+    mosfets,
     opAmps,
     nodeCount,
     opAmpRowOffset,
@@ -646,6 +669,7 @@ function solveNonlinearCircuit({
       baseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -665,6 +689,7 @@ function solveNonlinearCircuit({
       baseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -683,6 +708,7 @@ function runNewtonIterations(
   baseVector,
   diodes,
   bjts,
+  mosfets,
   opAmps,
   nodeCount,
   opAmpRowOffset,
@@ -699,6 +725,7 @@ function runNewtonIterations(
       baseVector,
       diodes,
       bjts,
+      mosfets,
       opAmps,
       nodeCount,
       opAmpRowOffset,
@@ -732,6 +759,7 @@ function runNewtonIterations(
         vector,
         diodes,
         bjts,
+        mosfets,
         rootByTerminal,
         getNodeIdx
       );
@@ -741,6 +769,7 @@ function runNewtonIterations(
         baseVector,
         diodes,
         bjts,
+        mosfets,
         opAmps,
         nodeCount,
         opAmpRowOffset,
@@ -783,6 +812,7 @@ function evaluateNonlinearSystem(
   baseVector,
   diodes,
   bjts,
+  mosfets,
   opAmps,
   nodeCount,
   opAmpRowOffset,
@@ -847,6 +877,30 @@ function evaluateNonlinearSystem(
     );
   }
 
+  for (const component of mosfets) {
+    const rGate = rootByTerminal.get(terminalKey(component.id, MOSFET_GATE_TERMINAL_INDEX));
+    const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
+    const rDrain = rootByTerminal.get(terminalKey(component.id, drainIndex));
+    const rSource = rootByTerminal.get(terminalKey(component.id, sourceIndex));
+    const nGate = getNodeIdx(rGate);
+    const nDrain = getNodeIdx(rDrain);
+    const nSource = getNodeIdx(rSource);
+    const vGate = nGate >= 0 ? vector[nGate] : 0;
+    const vDrain = nDrain >= 0 ? vector[nDrain] : 0;
+    const vSource = nSource >= 0 ? vector[nSource] : 0;
+    const model = evaluateMosfetModel(component, vGate - vSource, vDrain - vSource);
+
+    stampMosfetResidualAndJacobian(
+      residual,
+      jacobian,
+      nGate,
+      nDrain,
+      nSource,
+      model,
+      deviceScale
+    );
+  }
+
   opAmps.forEach((component, index) => {
     const row = opAmpRowOffset + index;
     const { plusIndex, minusIndex } = getOpAmpInputTerminalIndices(component);
@@ -878,6 +932,7 @@ function evaluateResidualNorm(
   baseVector,
   diodes,
   bjts,
+  mosfets,
   opAmps,
   nodeCount,
   opAmpRowOffset,
@@ -891,6 +946,7 @@ function evaluateResidualNorm(
     baseVector,
     diodes,
     bjts,
+    mosfets,
     opAmps,
     nodeCount,
     opAmpRowOffset,
@@ -947,7 +1003,15 @@ function stampConductance(matrix, n0, n1, conductance) {
   }
 }
 
-function limitCandidateJunctionVoltages(candidate, previousVector, diodes, bjts, rootByTerminal, getNodeIdx) {
+function limitCandidateJunctionVoltages(
+  candidate,
+  previousVector,
+  diodes,
+  bjts,
+  _mosfets,
+  rootByTerminal,
+  getNodeIdx
+) {
   if (!diodes.length && !bjts.length) return candidate;
 
   const limited = candidate.slice();
@@ -1033,6 +1097,35 @@ function stampBjtResidualAndJacobian(
   }
 }
 
+function stampMosfetResidualAndJacobian(
+  residual,
+  jacobian,
+  nGate,
+  nDrain,
+  nSource,
+  model,
+  scale = 1
+) {
+  const ids = model.ids * scale;
+  const dIds_dVg = model.dIds_dVg * scale;
+  const dIds_dVd = model.dIds_dVd * scale;
+  const dIds_dVs = model.dIds_dVs * scale;
+
+  if (nDrain >= 0) {
+    residual[nDrain] += ids;
+    if (nGate >= 0) jacobian[nDrain][nGate] += dIds_dVg;
+    if (nDrain >= 0) jacobian[nDrain][nDrain] += dIds_dVd;
+    if (nSource >= 0) jacobian[nDrain][nSource] += dIds_dVs;
+  }
+
+  if (nSource >= 0) {
+    residual[nSource] -= ids;
+    if (nGate >= 0) jacobian[nSource][nGate] -= dIds_dVg;
+    if (nDrain >= 0) jacobian[nSource][nDrain] -= dIds_dVd;
+    if (nSource >= 0) jacobian[nSource][nSource] -= dIds_dVs;
+  }
+}
+
 function solveLinearSystem(matrix, vector) {
   const n = matrix.length;
   const A = matrix.map((row, i) => [...row, vector[i]]);
@@ -1112,5 +1205,6 @@ export {
   getBranchVoltage,
   limitBranchVoltageStep,
   stampBjtResidualAndJacobian,
+  stampMosfetResidualAndJacobian,
   solveLinearSystem,
 };

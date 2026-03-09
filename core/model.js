@@ -2,6 +2,8 @@ import {
   BJT_COLLECTOR_TERMINAL_INDEX,
   BJT_EMITTER_TERMINAL_INDEX,
   COMPONENT_DEFS,
+  MOSFET_DRAIN_TERMINAL_INDEX,
+  MOSFET_SOURCE_TERMINAL_INDEX,
   OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,
   OP_AMP_TOP_INPUT_TERMINAL_INDEX,
 } from "./constants.js";
@@ -191,6 +193,19 @@ function getBjtCollectorEmitterTerminalIndices(component) {
     : {
         collectorIndex: BJT_COLLECTOR_TERMINAL_INDEX,
         emitterIndex: BJT_EMITTER_TERMINAL_INDEX,
+      };
+}
+
+function getMosfetDrainSourceTerminalIndices(component) {
+  const drainSourceSwapped = component?.drainSourceSwapped === true;
+  return drainSourceSwapped
+    ? {
+        drainIndex: MOSFET_SOURCE_TERMINAL_INDEX,
+        sourceIndex: MOSFET_DRAIN_TERMINAL_INDEX,
+      }
+    : {
+        drainIndex: MOSFET_DRAIN_TERMINAL_INDEX,
+        sourceIndex: MOSFET_SOURCE_TERMINAL_INDEX,
       };
 }
 
@@ -485,6 +500,7 @@ export {
   buildRouteTerminalOptionsForComponents,
   getOpAmpInputTerminalIndices,
   getBjtCollectorEmitterTerminalIndices,
+  getMosfetDrainSourceTerminalIndices,
   getCardinalValueLabelAnchor,
   getReverseCardinalValueLabelAnchor,
   getFootprintExtents,

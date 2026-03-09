@@ -27,6 +27,9 @@ const OP_AMP_OUTPUT_TERMINAL_INDEX = 2;
 const BJT_BASE_TERMINAL_INDEX = 0;
 const BJT_COLLECTOR_TERMINAL_INDEX = 1;
 const BJT_EMITTER_TERMINAL_INDEX = 2;
+const MOSFET_GATE_TERMINAL_INDEX = 0;
+const MOSFET_DRAIN_TERMINAL_INDEX = 1;
+const MOSFET_SOURCE_TERMINAL_INDEX = 2;
 const BJT_MIN_BETA = 20;
 const BJT_MAX_BETA = 300;
 const BJT_BETA_STEP = 1;
@@ -259,6 +262,72 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
   },
+  mosfet_n: {
+    label: "MOSFET N",
+    terminals: [
+      [-2, 0],
+      [0, -2],
+      [0, 2],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 1.55,
+    renderW: 4,
+    renderH: 4,
+    renderBounds: {
+      left: 2,
+      right: 0.18,
+      up: 2,
+      down: 2,
+    },
+    defaultValue: 0,
+    editable: true,
+    showValueLabel: false,
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 2.5, y: 2.5 },
+  },
+  mosfet_p: {
+    label: "MOSFET P",
+    terminals: [
+      [-2, 0],
+      [0, -2],
+      [0, 2],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 1.55,
+    renderW: 4,
+    renderH: 4,
+    renderBounds: {
+      left: 2,
+      right: 0.18,
+      up: 2,
+      down: 2,
+    },
+    defaultValue: 0,
+    editable: true,
+    showValueLabel: false,
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 2.5, y: 2.5 },
+  },
   bjt_npn: {
     label: "Trans NPN",
     terminals: [
@@ -387,6 +456,8 @@ const COMPONENT_ORDER = [
   "resistor",
   "op_amp",
   "diode",
+  "mosfet_n",
+  "mosfet_p",
   "bjt_npn",
   "bjt_pnp",
   "ground",
@@ -409,6 +480,12 @@ function isBjtComponentType(componentOrType) {
   const type =
     typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
   return type === "bjt_npn" || type === "bjt_pnp";
+}
+
+function isMosfetComponentType(componentOrType) {
+  const type =
+    typeof componentOrType === "string" ? componentOrType : componentOrType?.type;
+  return type === "mosfet_n" || type === "mosfet_p";
 }
 
 function getInitialCameraZoom() {
@@ -447,6 +524,9 @@ export {
   BJT_BASE_TERMINAL_INDEX,
   BJT_COLLECTOR_TERMINAL_INDEX,
   BJT_EMITTER_TERMINAL_INDEX,
+  MOSFET_GATE_TERMINAL_INDEX,
+  MOSFET_DRAIN_TERMINAL_INDEX,
+  MOSFET_SOURCE_TERMINAL_INDEX,
   BJT_MIN_BETA,
   BJT_MAX_BETA,
   BJT_BETA_STEP,
@@ -474,5 +554,6 @@ export {
   isIdealVoltageSourceComponent,
   isGroundReferencedVoltageSourceComponent,
   isBjtComponentType,
+  isMosfetComponentType,
   getInitialCameraZoom,
 };
