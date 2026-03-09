@@ -607,21 +607,21 @@ const COMPONENT_DEFS = {
 };
 
 const COMPONENT_ORDER = [
+  "resistor",
   "voltage_source",
   "current_source",
-  "resistor",
+  "ground",
+  VOLTAGE_NODE_TYPE,
   "op_amp",
+  "diode",
+  "zener_diode",
+  "bjt_npn",
+  "bjt_pnp",
+  "mosfet_n",
+  "mosfet_p",
   "and_gate",
   "or_gate",
   "xor_gate",
-  "diode",
-  "zener_diode",
-  "mosfet_n",
-  "mosfet_p",
-  "bjt_npn",
-  "bjt_pnp",
-  "ground",
-  VOLTAGE_NODE_TYPE,
 ];
 
 function isIdealVoltageSourceComponent(componentOrType) {
