@@ -1,5 +1,8 @@
 import {
   COMPONENT_DEFS,
+  LOGIC_GATE_HIGH_VOLTAGE,
+  LOGIC_GATE_THRESHOLD_VOLTAGE,
+  LOGIC_GATE_TRANSITION_VOLTAGE,
   MAX_BJT_SATURATION_ARG,
   MAX_DIODE_EXP_ARG,
   MAX_OP_AMP_TANH_ARG,
@@ -202,6 +205,30 @@ function evaluateOpAmpModel(component, differentialVoltage) {
   return {
     voltage: supply * tanhValue,
     gain: OP_AMP_OPEN_LOOP_GAIN * sech2,
+  };
+}
+
+function evaluateAndGateModel(inputA, inputB) {
+  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
+  const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
+  const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
+
+  const activationFromInput = (voltage) => {
+    const arg = clamp((voltage - threshold) / transition, -MAX_OP_AMP_TANH_ARG, MAX_OP_AMP_TANH_ARG);
+    const tanhValue = Math.tanh(arg);
+    const activation = 0.5 * (1 + tanhValue);
+    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
+    return { activation, derivative };
+  };
+
+  const inputAState = activationFromInput(inputA);
+  const inputBState = activationFromInput(inputB);
+  const voltage = highVoltage * inputAState.activation * inputBState.activation;
+
+  return {
+    voltage,
+    dVoltage_dInputA: highVoltage * inputAState.derivative * inputBState.activation,
+    dVoltage_dInputB: highVoltage * inputAState.activation * inputBState.derivative,
   };
 }
 
@@ -573,6 +600,18 @@ function buildOpAmpSvg(options = {}) {
   </svg>`;
 }
 
+function buildAndGateSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="48" y2="40"/>
+      <line x1="0" y1="120" x2="48" y2="120"/>
+      <line x1="200" y1="80" x2="240" y2="80"/>
+      <path d="M48 12 L128 12 A68 68 0 0 1 128 148 L48 148 Z"/>
+    </g>
+  </svg>`;
+}
+
 function buildDiodeSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
@@ -743,6 +782,7 @@ export {
   evaluateBjtCoreModel,
   evaluateBjtModel,
   evaluateOpAmpModel,
+  evaluateAndGateModel,
   evaluateMosfetModel,
   evaluatePmosfetModel,
   normalizeRotation,
@@ -771,6 +811,7 @@ export {
   buildCurrentSourceSvg,
   buildVoltageNodeSvg,
   buildOpAmpSvg,
+  buildAndGateSvg,
   buildDiodeSvg,
   buildZenerDiodeSvg,
   buildMosfetNSvg,

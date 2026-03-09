@@ -955,12 +955,50 @@ function componentsBodiesOverlap(a, b, padding = 0) {
   );
 }
 
+function componentsHaveCoincidentTerminalsInCircuit(circuit, firstComponentId, secondComponentId) {
+  const firstComponent = getComponentByIdFromCollection(circuit.components, firstComponentId);
+  const secondComponent = getComponentByIdFromCollection(circuit.components, secondComponentId);
+  if (!firstComponent || !secondComponent) return false;
+
+  const firstDef = COMPONENT_DEFS[firstComponent.type];
+  const secondDef = COMPONENT_DEFS[secondComponent.type];
+  if (!firstDef || !secondDef) return false;
+
+  for (let firstTerminalIndex = 0; firstTerminalIndex < firstDef.terminals.length; firstTerminalIndex += 1) {
+    const firstTerminal = getTerminalPositionForComponents(
+      circuit.components,
+      firstComponentId,
+      firstTerminalIndex
+    );
+    if (!firstTerminal) continue;
+
+    for (
+      let secondTerminalIndex = 0;
+      secondTerminalIndex < secondDef.terminals.length;
+      secondTerminalIndex += 1
+    ) {
+      const secondTerminal = getTerminalPositionForComponents(
+        circuit.components,
+        secondComponentId,
+        secondTerminalIndex
+      );
+      if (secondTerminal && sameGridPoint(firstTerminal, secondTerminal)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function findAutoContactCandidateForTargetsInCircuit(circuit, movingComponentId, targetComponents) {
   const movingComponent = getComponentByIdFromCollection(circuit.components, movingComponentId);
   if (!movingComponent) return null;
 
-  const overlappingComponents = targetComponents.filter((component) =>
-    componentsOverlap(movingComponent, component, 0)
+  const overlappingComponents = targetComponents.filter(
+    (component) =>
+      componentsOverlap(movingComponent, component, 0) ||
+      componentsHaveCoincidentTerminalsInCircuit(circuit, movingComponentId, component.id)
   );
   if (overlappingComponents.length === 0) {
     return null;

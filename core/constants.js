@@ -20,6 +20,9 @@ const OP_AMP_MIN_SUPPLY = 1;
 const OP_AMP_MAX_SUPPLY = 24;
 const OP_AMP_SUPPLY_STEP = 0.5;
 const MAX_OP_AMP_TANH_ARG = 18;
+const LOGIC_GATE_HIGH_VOLTAGE = 5;
+const LOGIC_GATE_THRESHOLD_VOLTAGE = 2.5;
+const LOGIC_GATE_TRANSITION_VOLTAGE = 0.08;
 const MAX_BJT_SATURATION_ARG = 24;
 const OP_AMP_TOP_INPUT_TERMINAL_INDEX = 0;
 const OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX = 1;
@@ -123,6 +126,7 @@ const COMPONENT_DEFS = {
     bodyOffsetY: 0.28,
     renderW: 2,
     renderH: 2,
+    collisionBounds: { left: 1, right: 1, up: 1, down: 1 },
     defaultRotation: 180,
     defaultValue: 10,
     editable: true,
@@ -228,6 +232,47 @@ const COMPONENT_DEFS = {
       [1, 2],
       [2, 2],
     ],
+    footprintExtents: { left: 3, right: 3, up: 3, down: 3 },
+    footprintHalf: { x: 3, y: 3 },
+  },
+  and_gate: {
+    label: "Porta AND",
+    terminals: [
+      [-3, -1],
+      [-3, 1],
+      [3, 0],
+    ],
+    bodyHalfW: 2.7,
+    bodyHalfH: 1.55,
+    renderW: 6,
+    renderH: 4,
+    defaultValue: 0,
+    editable: false,
+    showValueLabel: false,
+    obstacleCells: [
+      [-2, -2],
+      [-1, -2],
+      [0, -2],
+      [1, -2],
+      [2, -2],
+      [-2, -1],
+      [-1, -1],
+      [0, -1],
+      [-2, 0],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [2, 0],
+      [-2, 1],
+      [-1, 1],
+      [0, 1],
+      [-2, 2],
+      [-1, 2],
+      [0, 2],
+      [1, 2],
+      [2, 2],
+    ],
+    collisionBounds: { left: 3, right: 3, up: 3, down: 3 },
     footprintExtents: { left: 3, right: 3, up: 3, down: 3 },
     footprintHalf: { x: 3, y: 3 },
   },
@@ -484,6 +529,7 @@ const COMPONENT_ORDER = [
   "current_source",
   "resistor",
   "op_amp",
+  "and_gate",
   "diode",
   "zener_diode",
   "mosfet_n",
@@ -547,6 +593,9 @@ export {
   OP_AMP_MAX_SUPPLY,
   OP_AMP_SUPPLY_STEP,
   MAX_OP_AMP_TANH_ARG,
+  LOGIC_GATE_HIGH_VOLTAGE,
+  LOGIC_GATE_THRESHOLD_VOLTAGE,
+  LOGIC_GATE_TRANSITION_VOLTAGE,
   MAX_BJT_SATURATION_ARG,
   OP_AMP_TOP_INPUT_TERMINAL_INDEX,
   OP_AMP_BOTTOM_INPUT_TERMINAL_INDEX,

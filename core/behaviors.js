@@ -24,6 +24,7 @@ import {
   buildGroundSvg,
   buildMosfetNSvg,
   buildMosfetPSvg,
+  buildAndGateSvg,
   buildOpAmpSvg,
   buildResistorSvg,
   buildZenerDiodeSvg,
@@ -202,6 +203,13 @@ const COMPONENT_BEHAVIORS = {
         return "Entradas do amp op trocadas";
       },
     },
+  },
+  and_gate: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildAndGateSvg(options),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [],
   },
   diode: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
