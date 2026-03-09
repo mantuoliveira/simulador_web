@@ -26,6 +26,8 @@ import {
   evaluateDiodeModel,
   evaluateMosfetModel,
   evaluateOpAmpModel,
+  evaluateOrGateModel,
+  evaluateXorGateModel,
   evaluateZenerModel,
   maxAbsValue,
   multiplyMatrixVector,
@@ -165,11 +167,16 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
   const bjts = activeComponents.filter((component) => isBjtComponentType(component));
   const mosfets = activeComponents.filter((component) => isMosfetComponentType(component));
   const opAmps = activeComponents.filter((component) => component.type === "op_amp");
-  const andGates = activeComponents.filter((component) => component.type === "and_gate");
+  const logicGates = activeComponents.filter(
+    (component) =>
+      component.type === "and_gate" ||
+      component.type === "or_gate" ||
+      component.type === "xor_gate"
+  );
 
   const N = nonGroundRoots.length;
   const M = voltageSources.length;
-  const O = opAmps.length + andGates.length;
+  const O = opAmps.length + logicGates.length;
   const size = N + M + O;
 
   if (size === 0) {
@@ -185,7 +192,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     activeComponents,
     voltageSources,
     opAmps,
-    andGates,
+    logicGates,
     rootByTerminal,
     getNodeIdx,
     N
@@ -198,7 +205,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
     bjts.length > 0 ||
     mosfets.length > 0 ||
     opAmps.length > 0 ||
-    andGates.length > 0
+    logicGates.length > 0
   ) {
     solution = solveNonlinearCircuit({
       baseMatrix: linearSystem.A,
@@ -208,7 +215,7 @@ function simulateCircuit({ components, wires, previousSolution = null }) {
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount: N,
       opAmpRowOffset: N + M,
       rootByTerminal,
@@ -386,12 +393,12 @@ function buildLinearMnaSystem(
   activeComponents,
   voltageSources,
   opAmps,
-  andGates,
+  logicGates,
   rootByTerminal,
   getNodeIdx,
   nodeCount
 ) {
-  const size = nodeCount + voltageSources.length + opAmps.length + andGates.length;
+  const size = nodeCount + voltageSources.length + opAmps.length + logicGates.length;
   const A = Array.from({ length: size }, () => Array(size).fill(0));
   const z = Array(size).fill(0);
 
@@ -447,7 +454,7 @@ function buildLinearMnaSystem(
     }
   });
 
-  andGates.forEach((component, index) => {
+  logicGates.forEach((component, index) => {
     const row = nodeCount + voltageSources.length + opAmps.length + index;
     const outputRoot = rootByTerminal.get(terminalKey(component.id, OP_AMP_OUTPUT_TERMINAL_INDEX));
     const outputNode = getNodeIdx(outputRoot);
@@ -469,7 +476,7 @@ function solveNonlinearCircuit({
   bjts,
   mosfets,
   opAmps,
-  andGates,
+  logicGates,
   nodeCount,
   opAmpRowOffset,
   rootByTerminal,
@@ -490,7 +497,7 @@ function solveNonlinearCircuit({
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -512,7 +519,7 @@ function solveNonlinearCircuit({
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -542,7 +549,7 @@ function solveNonlinearCircuit({
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -562,7 +569,7 @@ function solveNonlinearCircuit({
           bjts,
           mosfets,
           opAmps,
-          andGates,
+          logicGates,
           nodeCount,
           opAmpRowOffset,
           rootByTerminal,
@@ -593,7 +600,7 @@ function solveNonlinearCircuit({
     bjts,
     mosfets,
     opAmps,
-    andGates,
+    logicGates,
     nodeCount,
     opAmpRowOffset,
     rootByTerminal,
@@ -614,7 +621,7 @@ function solveNonlinearCircuit({
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -636,7 +643,7 @@ function solveNonlinearCircuit({
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -657,7 +664,7 @@ function runNewtonIterations(
   bjts,
   mosfets,
   opAmps,
-  andGates,
+  logicGates,
   nodeCount,
   opAmpRowOffset,
   rootByTerminal,
@@ -676,7 +683,7 @@ function runNewtonIterations(
       bjts,
       mosfets,
       opAmps,
-      andGates,
+      logicGates,
       nodeCount,
       opAmpRowOffset,
       rootByTerminal,
@@ -723,7 +730,7 @@ function runNewtonIterations(
         bjts,
         mosfets,
         opAmps,
-        andGates,
+        logicGates,
         nodeCount,
         opAmpRowOffset,
         rootByTerminal,
@@ -768,7 +775,7 @@ function evaluateNonlinearSystem(
   bjts,
   mosfets,
   opAmps,
-  andGates,
+  logicGates,
   nodeCount,
   opAmpRowOffset,
   rootByTerminal,
@@ -905,7 +912,7 @@ function evaluateNonlinearSystem(
     }
   });
 
-  andGates.forEach((component, index) => {
+  logicGates.forEach((component, index) => {
     const row = opAmpRowOffset + opAmps.length + index;
     const rInputA = rootByTerminal.get(terminalKey(component.id, 0));
     const rInputB = rootByTerminal.get(terminalKey(component.id, 1));
@@ -913,10 +920,12 @@ function evaluateNonlinearSystem(
     const nInputB = getNodeIdx(rInputB);
     const vInputA = nInputA >= 0 ? vector[nInputA] : 0;
     const vInputB = nInputB >= 0 ? vector[nInputB] : 0;
-    const { voltage, dVoltage_dInputA, dVoltage_dInputB } = evaluateAndGateModel(
-      vInputA,
-      vInputB
-    );
+    const { voltage, dVoltage_dInputA, dVoltage_dInputB } =
+      component.type === "xor_gate"
+        ? evaluateXorGateModel(vInputA, vInputB)
+        : component.type === "or_gate"
+          ? evaluateOrGateModel(vInputA, vInputB)
+          : evaluateAndGateModel(vInputA, vInputB);
 
     residual[row] -= voltage;
 
@@ -941,7 +950,7 @@ function evaluateResidualNorm(
   bjts,
   mosfets,
   opAmps,
-  andGates,
+  logicGates,
   nodeCount,
   opAmpRowOffset,
   rootByTerminal,
@@ -957,7 +966,7 @@ function evaluateResidualNorm(
     bjts,
     mosfets,
     opAmps,
-    andGates,
+    logicGates,
     nodeCount,
     opAmpRowOffset,
     rootByTerminal,

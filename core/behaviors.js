@@ -25,6 +25,8 @@ import {
   buildMosfetNSvg,
   buildMosfetPSvg,
   buildAndGateSvg,
+  buildOrGateSvg,
+  buildXorGateSvg,
   buildOpAmpSvg,
   buildResistorSvg,
   buildZenerDiodeSvg,
@@ -169,19 +171,52 @@ const COMPONENT_BEHAVIORS = {
   },
   op_amp: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
-    createState: () => ({ inputsSwapped: false }),
+    createState: () => ({
+      inputsSwapped: false,
+      activeEditableParam: "supply",
+      av: 200,
+    }),
     buildSvg: (options = {}) => buildOpAmpSvg(options),
-    formatValue: (component) => formatSymmetricVoltage(component.value),
+    formatValue: (component) =>
+      component.activeEditableParam === "av"
+        ? `Av=${component.av.toFixed(0)} kV/V`
+        : formatSymmetricVoltage(component.value),
     formatWheelValue: (component) =>
-      `±${formatEngineeringValueFixed(Math.abs(component.value), "V", 1)}`,
-    valueFromNormalized: (_component, normalized) =>
-      snapToStep(
+      component.activeEditableParam === "av"
+        ? `Av=${component.av.toFixed(0)} kV/V`
+        : `±${formatEngineeringValueFixed(Math.abs(component.value), "V", 1)}`,
+    valueFromNormalized: (component, normalized) => {
+      if (component.activeEditableParam === "av") {
+        return snapToStep(10 + 990 * clamp(normalized, 0, 1), 10);
+      }
+
+      return snapToStep(
         OP_AMP_MIN_SUPPLY + (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY) * clamp(normalized, 0, 1),
         OP_AMP_SUPPLY_STEP
-      ),
+      );
+    },
     normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "av") {
+        return clamp((component.av - 10) / 990, 0, 1);
+      }
+
       const safe = clamp(Math.abs(component.value), OP_AMP_MIN_SUPPLY, OP_AMP_MAX_SUPPLY);
       return clamp((safe - OP_AMP_MIN_SUPPLY) / (OP_AMP_MAX_SUPPLY - OP_AMP_MIN_SUPPLY), 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "av") {
+        component.av = value;
+        return;
+      }
+
+      component.value = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "supply";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam = component.activeEditableParam === "av" ? "supply" : "av";
+      return true;
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
     isSimulatedBranch: true,
@@ -207,6 +242,20 @@ const COMPONENT_BEHAVIORS = {
   and_gate: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildAndGateSvg(options),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [],
+  },
+  or_gate: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildOrGateSvg(options),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [],
+  },
+  xor_gate: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildXorGateSvg(options),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.2),
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [],
@@ -635,6 +684,14 @@ function getComponentWheelDisplay(component) {
   }
 
   if (component.type === "op_amp") {
+    if (component.activeEditableParam === "av") {
+      return {
+        parameter: "Av",
+        value: component.av.toFixed(0),
+        unit: "kV/V",
+      };
+    }
+
     const valueAndUnit = splitWheelValueAndUnit(
       formatEngineeringValueFixed(Math.abs(component.value), "V", 1)
     );

@@ -198,13 +198,21 @@ function evaluateBjtModel(component, vbe, vbc) {
 
 function evaluateOpAmpModel(component, differentialVoltage) {
   const supply = safeOpAmpSupply(component?.value);
-  const arg = clamp((OP_AMP_OPEN_LOOP_GAIN * differentialVoltage) / supply, -MAX_OP_AMP_TANH_ARG, MAX_OP_AMP_TANH_ARG);
+  const openLoopGainKvPerV = Number.isFinite(component?.av)
+    ? component.av
+    : OP_AMP_OPEN_LOOP_GAIN / 1000;
+  const openLoopGain = clamp(openLoopGainKvPerV, 10, 1000) * 1000;
+  const arg = clamp(
+    (openLoopGain * differentialVoltage) / supply,
+    -MAX_OP_AMP_TANH_ARG,
+    MAX_OP_AMP_TANH_ARG
+  );
   const tanhValue = Math.tanh(arg);
   const sech2 = Math.max(0, 1 - tanhValue * tanhValue);
 
   return {
     voltage: supply * tanhValue,
-    gain: OP_AMP_OPEN_LOOP_GAIN * sech2,
+    gain: openLoopGain * sech2,
   };
 }
 
@@ -229,6 +237,70 @@ function evaluateAndGateModel(inputA, inputB) {
     voltage,
     dVoltage_dInputA: highVoltage * inputAState.derivative * inputBState.activation,
     dVoltage_dInputB: highVoltage * inputAState.activation * inputBState.derivative,
+  };
+}
+
+function evaluateOrGateModel(inputA, inputB) {
+  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
+  const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
+  const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
+
+  const activationFromInput = (voltage) => {
+    const arg = clamp(
+      (voltage - threshold) / transition,
+      -MAX_OP_AMP_TANH_ARG,
+      MAX_OP_AMP_TANH_ARG
+    );
+    const tanhValue = Math.tanh(arg);
+    const activation = 0.5 * (1 + tanhValue);
+    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
+    return { activation, derivative };
+  };
+
+  const inputAState = activationFromInput(inputA);
+  const inputBState = activationFromInput(inputB);
+  const voltage =
+    highVoltage *
+    (inputAState.activation +
+      inputBState.activation -
+      inputAState.activation * inputBState.activation);
+
+  return {
+    voltage,
+    dVoltage_dInputA: highVoltage * inputAState.derivative * (1 - inputBState.activation),
+    dVoltage_dInputB: highVoltage * inputBState.derivative * (1 - inputAState.activation),
+  };
+}
+
+function evaluateXorGateModel(inputA, inputB) {
+  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
+  const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
+  const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
+
+  const activationFromInput = (voltage) => {
+    const arg = clamp(
+      (voltage - threshold) / transition,
+      -MAX_OP_AMP_TANH_ARG,
+      MAX_OP_AMP_TANH_ARG
+    );
+    const tanhValue = Math.tanh(arg);
+    const activation = 0.5 * (1 + tanhValue);
+    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
+    return { activation, derivative };
+  };
+
+  const inputAState = activationFromInput(inputA);
+  const inputBState = activationFromInput(inputB);
+  const voltage =
+    highVoltage *
+    (inputAState.activation +
+      inputBState.activation -
+      2 * inputAState.activation * inputBState.activation);
+
+  return {
+    voltage,
+    dVoltage_dInputA: highVoltage * inputAState.derivative * (1 - 2 * inputBState.activation),
+    dVoltage_dInputB: highVoltage * inputBState.derivative * (1 - 2 * inputAState.activation),
   };
 }
 
@@ -612,6 +684,33 @@ function buildAndGateSvg(options = {}) {
   </svg>`;
 }
 
+function buildOrGateSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="60" y2="40"/>
+      <line x1="0" y1="120" x2="60" y2="120"/>
+      <line x1="200" y1="80" x2="240" y2="80"/>
+      <path d="M48 12 Q118 18 200 80 Q118 142 48 148"/>
+      <path d="M48 12 Q92 80 48 148"/>
+    </g>
+  </svg>`;
+}
+
+function buildXorGateSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="44" y2="40"/>
+      <line x1="0" y1="120" x2="44" y2="120"/>
+      <line x1="200" y1="80" x2="240" y2="80"/>
+      <path d="M48 12 Q118 18 200 80 Q118 142 48 148"/>
+      <path d="M48 12 Q92 80 48 148"/>
+      <path d="M32 12 Q76 80 32 148"/>
+    </g>
+  </svg>`;
+}
+
 function buildDiodeSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
@@ -783,6 +882,8 @@ export {
   evaluateBjtModel,
   evaluateOpAmpModel,
   evaluateAndGateModel,
+  evaluateOrGateModel,
+  evaluateXorGateModel,
   evaluateMosfetModel,
   evaluatePmosfetModel,
   normalizeRotation,
@@ -812,6 +913,8 @@ export {
   buildVoltageNodeSvg,
   buildOpAmpSvg,
   buildAndGateSvg,
+  buildOrGateSvg,
+  buildXorGateSvg,
   buildDiodeSvg,
   buildZenerDiodeSvg,
   buildMosfetNSvg,
