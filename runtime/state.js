@@ -162,7 +162,6 @@ const mainRenderTarget = createRenderTarget(appEls.canvas);
 
 const renderState = {
   rafId: null,
-  idleTimerId: null,
   dirty: true,
 };
 

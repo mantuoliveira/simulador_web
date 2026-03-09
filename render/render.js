@@ -2,7 +2,6 @@ import {
   BJT_BASE_TERMINAL_INDEX,
   COMPONENT_DEFS,
   DARK_THEME,
-  IDLE_FRAME_MS,
   LIGHT_THEME,
   RESISTOR_THERMAL_BUCKET_COUNT,
   RESISTOR_THERMAL_RATED_POWER_W,
@@ -91,11 +90,6 @@ function cancelScheduledRender() {
     cancelAnimationFrame(renderState.rafId);
     renderState.rafId = null;
   }
-
-  if (renderState.idleTimerId != null) {
-    clearTimeout(renderState.idleTimerId);
-    renderState.idleTimerId = null;
-  }
 }
 
 function requestRender(immediate = false) {
@@ -108,26 +102,10 @@ function scheduleRender(immediate = false) {
 
   const interacting = isHighFpsInteractionActive();
   if (immediate || interacting || renderState.dirty) {
-    if (renderState.idleTimerId != null) {
-      clearTimeout(renderState.idleTimerId);
-      renderState.idleTimerId = null;
-    }
-
     if (renderState.rafId == null) {
       renderState.rafId = requestAnimationFrame(renderLoop);
     }
-    return;
   }
-
-  if (renderState.rafId != null || renderState.idleTimerId != null) return;
-
-  renderState.idleTimerId = setTimeout(() => {
-    renderState.idleTimerId = null;
-    if (document.hidden) return;
-    if (renderState.rafId == null) {
-      renderState.rafId = requestAnimationFrame(renderLoop);
-    }
-  }, IDLE_FRAME_MS);
 }
 
 function renderLoop() {
