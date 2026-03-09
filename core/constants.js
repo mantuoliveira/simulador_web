@@ -177,7 +177,6 @@ const COMPONENT_DEFS = {
     bodyHalfH: 0.95,
     renderW: 4,
     renderH: 2,
-    collisionBounds: { left: 2, right: 2, up: 1, down: 1 },
     defaultValue: 1000,
     editable: true,
     unit: "Ω",
@@ -192,6 +191,8 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
+    collisionBounds: { left: 2, right: 2, up: 1, down: 1 },
+    footprintExtents: { left: 2, right: 2, up: 1, down: 1 },
     footprintHalf: { x: 2.5, y: 1.5 },
   },
   op_amp: {
@@ -448,6 +449,8 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
+    collisionBounds: { left: 2, right: 1, up: 2, down: 2 },
+    footprintExtents: { left: 2, right: 1, up: 2, down: 2 },
     footprintHalf: { x: 2.5, y: 2.5 },
   },
   mosfet_p: {
@@ -481,6 +484,8 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
+    collisionBounds: { left: 2, right: 1, up: 2, down: 2 },
+    footprintExtents: { left: 2, right: 1, up: 2, down: 2 },
     footprintHalf: { x: 2.5, y: 2.5 },
   },
   bjt_npn: {
@@ -525,6 +530,8 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
+    collisionBounds: { left: 2, right: 1, up: 2, down: 2 },
+    footprintExtents: { left: 2, right: 1, up: 2, down: 2 },
     footprintHalf: { x: 2.5, y: 2.5 },
   },
   bjt_pnp: {
@@ -569,6 +576,8 @@ const COMPONENT_DEFS = {
       [0, 1],
       [1, 1],
     ],
+    collisionBounds: { left: 2, right: 1, up: 2, down: 2 },
+    footprintExtents: { left: 2, right: 1, up: 2, down: 2 },
     footprintHalf: { x: 2.5, y: 2.5 },
   },
   junction: {

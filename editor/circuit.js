@@ -180,7 +180,7 @@ function handleWireTap(wireHit) {
   }
 
   const junction = buildJunctionComponent(wireHit.point);
-  if (!isComponentPlacementValid(junction, null, 0)) {
+  if (!isJunctionPlacementValidForWireTap(junction)) {
     showStatus("Nao foi possivel criar a juncao", true);
     state.pendingTerminal = null;
     updateSelectionUi();
@@ -290,6 +290,25 @@ function buildJunctionComponentForCircuit(circuit, point) {
     rotation: 0,
     value: 0,
   };
+}
+
+function isJunctionPlacementValidForWireTap(junction, circuit = state) {
+  if (!junction) return false;
+
+  for (const component of circuit.components) {
+    if (component.type === "junction") {
+      if (sameGridPoint(component, junction)) {
+        return false;
+      }
+      continue;
+    }
+
+    if (pointInsideComponentBody(component, junction.x, junction.y)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function buildSplitWires(originalWire, junctionId, splitPaths) {

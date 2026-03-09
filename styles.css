@@ -365,9 +365,12 @@ body {
   gap: 12px;
 }
 
-#edit-terminal-label-btn {
+#center-actions {
   grid-column: 2;
   justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 button {
