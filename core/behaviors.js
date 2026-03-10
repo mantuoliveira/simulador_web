@@ -522,6 +522,22 @@ function rememberComponentRotation(component, circuit) {
   circuit.preferredComponentRotations.set(component.type, normalizeRotation(component.rotation || 0));
 }
 
+function getDefaultComponentParams(type, circuit) {
+  if (!(circuit?.preferredComponentParams instanceof Map)) return {};
+  return circuit.preferredComponentParams.get(type) ?? {};
+}
+
+function rememberComponentParams(component, circuit) {
+  if (!component || !(circuit?.preferredComponentParams instanceof Map)) return;
+
+  const stateKeys = Object.keys(getComponentBehavior(component.type).createState());
+  const params = { value: component.value };
+  for (const key of stateKeys) {
+    params[key] = component[key];
+  }
+  circuit.preferredComponentParams.set(component.type, params);
+}
+
 function formatComponentValue(component) {
   return getComponentBehavior(component.type).formatValue(component);
 }
@@ -712,6 +728,8 @@ export {
   getComponentBehavior,
   getDefaultComponentRotation,
   rememberComponentRotation,
+  getDefaultComponentParams,
+  rememberComponentParams,
   formatComponentValue,
   formatComponentWheelValue,
   getComponentWheelDisplay,

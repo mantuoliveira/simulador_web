@@ -19,6 +19,8 @@ import {
   getComponentBehavior,
   getDefaultComponentRotation,
   rememberComponentRotation,
+  getDefaultComponentParams,
+  rememberComponentParams,
   resetEditableParameter,
   toggleEditableParameter,
 } from "../core/behaviors.js";
@@ -266,6 +268,7 @@ function addComponentToCircuit(circuit, type, position) {
     rotation: getDefaultComponentRotation(type, circuit),
     value: def.defaultValue,
     ...behavior.createState(),
+    ...getDefaultComponentParams(type, circuit),
   };
 
   if (!isComponentPlacementValidForComponents(circuit.components, component, null, 0)) {
@@ -1517,6 +1520,7 @@ function toggleSelectedEditableParameter() {
     return false;
   }
 
+  rememberComponentParams(component, state);
   updateSelectionUi();
   return true;
 }
@@ -2259,6 +2263,7 @@ function updateValueFromWheelPointer(clientX, clientY) {
   }
 
   applyNormalizedValueToComponent(component, normalized);
+  rememberComponentParams(component, state);
   syncWheelWithSelectedComponent();
   onCircuitChanged();
 }
