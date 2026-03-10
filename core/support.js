@@ -216,21 +216,23 @@ function evaluateOpAmpModel(component, differentialVoltage) {
   };
 }
 
-function evaluateAndGateModel(inputA, inputB) {
-  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
+function gateActivationFromInput(voltage) {
   const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
+  const arg = clamp(
+    (voltage - LOGIC_GATE_THRESHOLD_VOLTAGE) / transition,
+    -MAX_OP_AMP_TANH_ARG,
+    MAX_OP_AMP_TANH_ARG
+  );
+  const tanhValue = Math.tanh(arg);
+  const activation = 0.5 * (1 + tanhValue);
+  const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
+  return { activation, derivative };
+}
+
+function evaluateAndGateModel(inputA, inputB) {
   const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
-
-  const activationFromInput = (voltage) => {
-    const arg = clamp((voltage - threshold) / transition, -MAX_OP_AMP_TANH_ARG, MAX_OP_AMP_TANH_ARG);
-    const tanhValue = Math.tanh(arg);
-    const activation = 0.5 * (1 + tanhValue);
-    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
-    return { activation, derivative };
-  };
-
-  const inputAState = activationFromInput(inputA);
-  const inputBState = activationFromInput(inputB);
+  const inputAState = gateActivationFromInput(inputA);
+  const inputBState = gateActivationFromInput(inputB);
   const voltage = highVoltage * inputAState.activation * inputBState.activation;
 
   return {
@@ -241,24 +243,9 @@ function evaluateAndGateModel(inputA, inputB) {
 }
 
 function evaluateOrGateModel(inputA, inputB) {
-  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
-  const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
   const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
-
-  const activationFromInput = (voltage) => {
-    const arg = clamp(
-      (voltage - threshold) / transition,
-      -MAX_OP_AMP_TANH_ARG,
-      MAX_OP_AMP_TANH_ARG
-    );
-    const tanhValue = Math.tanh(arg);
-    const activation = 0.5 * (1 + tanhValue);
-    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
-    return { activation, derivative };
-  };
-
-  const inputAState = activationFromInput(inputA);
-  const inputBState = activationFromInput(inputB);
+  const inputAState = gateActivationFromInput(inputA);
+  const inputBState = gateActivationFromInput(inputB);
   const voltage =
     highVoltage *
     (inputAState.activation +
@@ -273,24 +260,9 @@ function evaluateOrGateModel(inputA, inputB) {
 }
 
 function evaluateXorGateModel(inputA, inputB) {
-  const threshold = LOGIC_GATE_THRESHOLD_VOLTAGE;
-  const transition = Math.max(1e-6, LOGIC_GATE_TRANSITION_VOLTAGE);
   const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
-
-  const activationFromInput = (voltage) => {
-    const arg = clamp(
-      (voltage - threshold) / transition,
-      -MAX_OP_AMP_TANH_ARG,
-      MAX_OP_AMP_TANH_ARG
-    );
-    const tanhValue = Math.tanh(arg);
-    const activation = 0.5 * (1 + tanhValue);
-    const derivative = (0.5 * Math.max(0, 1 - tanhValue * tanhValue)) / transition;
-    return { activation, derivative };
-  };
-
-  const inputAState = activationFromInput(inputA);
-  const inputBState = activationFromInput(inputB);
+  const inputAState = gateActivationFromInput(inputA);
+  const inputBState = gateActivationFromInput(inputB);
   const voltage =
     highVoltage *
     (inputAState.activation +
@@ -432,27 +404,32 @@ function formatResistance(value) {
   return `${roundTo(value, 2)} Ω`;
 }
 
+const SI_PREFIXES = new Map([
+  [-12, "p"],
+  [-9, "n"],
+  [-6, "µ"],
+  [-3, "m"],
+  [0, ""],
+  [3, "k"],
+  [6, "M"],
+  [9, "G"],
+  [12, "T"],
+]);
+
+function engineeringExponent(value) {
+  const abs = Math.abs(value);
+  const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
+  return clamp(rawExponent, -12, 12);
+}
+
 function formatEngineeringValue(value, unit, decimals = 2) {
   if (!Number.isFinite(value) || value === 0) {
     return `0 ${unit}`;
   }
 
-  const prefixes = new Map([
-    [-12, "p"],
-    [-9, "n"],
-    [-6, "µ"],
-    [-3, "m"],
-    [0, ""],
-    [3, "k"],
-    [6, "M"],
-    [9, "G"],
-    [12, "T"],
-  ]);
-  const abs = Math.abs(value);
-  const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
-  const exponent = clamp(rawExponent, -12, 12);
+  const exponent = engineeringExponent(value);
   const scaled = value / Math.pow(10, exponent);
-  return `${roundTo(scaled, decimals)} ${prefixes.get(exponent)}${unit}`;
+  return `${roundTo(scaled, decimals)} ${SI_PREFIXES.get(exponent)}${unit}`;
 }
 
 function formatEngineeringValueFixed(value, unit, decimals = 1) {
@@ -461,22 +438,9 @@ function formatEngineeringValueFixed(value, unit, decimals = 1) {
     return `${(0).toFixed(safeDecimals)} ${unit}`;
   }
 
-  const prefixes = new Map([
-    [-12, "p"],
-    [-9, "n"],
-    [-6, "µ"],
-    [-3, "m"],
-    [0, ""],
-    [3, "k"],
-    [6, "M"],
-    [9, "G"],
-    [12, "T"],
-  ]);
-  const abs = Math.abs(value);
-  const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
-  const exponent = clamp(rawExponent, -12, 12);
+  const exponent = engineeringExponent(value);
   const scaled = value / Math.pow(10, exponent);
-  return `${scaled.toFixed(safeDecimals)} ${prefixes.get(exponent)}${unit}`;
+  return `${scaled.toFixed(safeDecimals)} ${SI_PREFIXES.get(exponent)}${unit}`;
 }
 
 function formatVoltage(value) {

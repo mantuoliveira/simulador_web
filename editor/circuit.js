@@ -2281,24 +2281,6 @@ function normalizedFromValue(component) {
   return getComponentBehavior(component.type).normalizedFromValue(component);
 }
 
-function quantizeResistor(value) {
-  const decades = [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
-  const exponent = Math.floor(Math.log10(value));
-  const mantissa = value / Math.pow(10, exponent);
-
-  let best = decades[0];
-  let bestErr = Infinity;
-  for (const d of decades) {
-    const err = Math.abs(d - mantissa);
-    if (err < bestErr) {
-      bestErr = err;
-      best = d;
-    }
-  }
-
-  const quantized = best * Math.pow(10, exponent);
-  return clamp(quantized, 1, 1_000_000);
-}
 
 function getComponentByIdFromCollection(components, id) {
   if (id == null) return null;
@@ -2763,7 +2745,6 @@ export {
   getWheelNormalizedAtClientPoint,
   valueFromNormalized,
   normalizedFromValue,
-  quantizeResistor,
   getComponentByIdFromCollection,
   getWireByIdFromCollection,
   getTerminalPositionForComponents,
