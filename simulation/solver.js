@@ -461,7 +461,7 @@ function buildLinearMnaSystem(
     }
 
     if (component.type === "capacitor") {
-      stampConductance(A, n0, n1, safeCapacitance(component.value));
+      stampConductance(A, n0, n1, safeCapacitance(component.value) * 1e-9);
     }
 
     if (component.type === "current_source") {
