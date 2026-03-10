@@ -25,6 +25,7 @@ import {
   evaluateBjtModel,
   evaluateDiodeModel,
   evaluateMosfetModel,
+  evaluateNotGateModel,
   evaluateOpAmpModel,
   evaluateOrGateModel,
   evaluateXorGateModel,
@@ -177,7 +178,8 @@ function simulateCircuit({
     (component) =>
       component.type === "and_gate" ||
       component.type === "or_gate" ||
-      component.type === "xor_gate"
+      component.type === "xor_gate" ||
+      component.type === "not_gate"
   );
 
   const N = nonGroundRoots.length;
@@ -476,7 +478,9 @@ function buildLinearMnaSystem(
 
   logicGates.forEach((component, index) => {
     const row = nodeCount + voltageSources.length + opAmps.length + index;
-    const outputRoot = rootByTerminal.get(terminalKey(component.id, OP_AMP_OUTPUT_TERMINAL_INDEX));
+    const outputTerminalIdx =
+      component.type === "not_gate" ? 1 : OP_AMP_OUTPUT_TERMINAL_INDEX;
+    const outputRoot = rootByTerminal.get(terminalKey(component.id, outputTerminalIdx));
     const outputNode = getNodeIdx(outputRoot);
 
     if (outputNode >= 0) {
@@ -934,6 +938,18 @@ function evaluateNonlinearSystem(
 
   logicGates.forEach((component, index) => {
     const row = opAmpRowOffset + opAmps.length + index;
+
+    if (component.type === "not_gate") {
+      const rInput = rootByTerminal.get(terminalKey(component.id, 0));
+      const nInput = getNodeIdx(rInput);
+      const vInput = nInput >= 0 ? vector[nInput] : 0;
+      const { voltage, dVoltage_dInputA } = evaluateNotGateModel(vInput);
+
+      residual[row] -= voltage;
+      if (nInput >= 0) jacobian[row][nInput] -= dVoltage_dInputA;
+      return;
+    }
+
     const rInputA = rootByTerminal.get(terminalKey(component.id, 0));
     const rInputB = rootByTerminal.get(terminalKey(component.id, 1));
     const nInputA = getNodeIdx(rInputA);

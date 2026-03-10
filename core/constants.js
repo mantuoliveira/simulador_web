@@ -355,6 +355,34 @@ const COMPONENT_DEFS = {
     footprintExtents: { left: 3, right: 3, up: 3, down: 3 },
     footprintHalf: { x: 3, y: 3 },
   },
+  not_gate: {
+    label: "Porta NOT",
+    terminals: [
+      [-2, 0],
+      [2, 0],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 0.95,
+    renderW: 4,
+    renderH: 2,
+    defaultValue: 0,
+    editable: false,
+    showValueLabel: false,
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    collisionBounds: { left: 2, right: 2, up: 1, down: 1 },
+    footprintExtents: { left: 2, right: 2, up: 1, down: 1 },
+    footprintHalf: { x: 2.5, y: 1.5 },
+  },
   diode: {
     label: "Diodo",
     terminals: [
@@ -627,6 +655,7 @@ const COMPONENT_ORDER = [
   "and_gate",
   "or_gate",
   "xor_gate",
+  "not_gate",
 ];
 
 function isIdealVoltageSourceComponent(componentOrType) {

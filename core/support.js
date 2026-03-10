@@ -276,6 +276,17 @@ function evaluateXorGateModel(inputA, inputB) {
   };
 }
 
+function evaluateNotGateModel(inputA) {
+  const highVoltage = Math.max(0, LOGIC_GATE_HIGH_VOLTAGE);
+  const inputAState = gateActivationFromInput(inputA);
+  const voltage = highVoltage * (1 - inputAState.activation);
+
+  return {
+    voltage,
+    dVoltage_dInputA: -highVoltage * inputAState.derivative,
+  };
+}
+
 function evaluateMosfetModel(component, vgs, vds) {
   if (component?.type === "mosfet_p") {
     return evaluatePmosfetModel(component, vgs, vds);
@@ -675,6 +686,18 @@ function buildXorGateSvg(options = {}) {
   </svg>`;
 }
 
+function buildNotGateSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="36" y2="40"/>
+      <path d="M36 8 L36 72 L108 40 Z"/>
+      <circle cx="120" cy="40" r="12"/>
+      <line x1="132" y1="40" x2="160" y2="40"/>
+    </g>
+  </svg>`;
+}
+
 function buildDiodeSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
@@ -848,6 +871,7 @@ export {
   evaluateAndGateModel,
   evaluateOrGateModel,
   evaluateXorGateModel,
+  evaluateNotGateModel,
   evaluateMosfetModel,
   evaluatePmosfetModel,
   normalizeRotation,
@@ -879,6 +903,7 @@ export {
   buildAndGateSvg,
   buildOrGateSvg,
   buildXorGateSvg,
+  buildNotGateSvg,
   buildDiodeSvg,
   buildZenerDiodeSvg,
   buildMosfetNSvg,
