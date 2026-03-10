@@ -31,6 +31,10 @@ const BJT_EMITTER_TERMINAL_INDEX = 2;
 const MOSFET_GATE_TERMINAL_INDEX = 0;
 const MOSFET_DRAIN_TERMINAL_INDEX = 1;
 const MOSFET_SOURCE_TERMINAL_INDEX = 2;
+const CCCS_CONTROL_FROM_TERMINAL_INDEX = 0;
+const CCCS_CONTROL_TO_TERMINAL_INDEX = 1;
+const CCCS_OUTPUT_FROM_TERMINAL_INDEX = 2;
+const CCCS_OUTPUT_TO_TERMINAL_INDEX = 3;
 const BJT_MIN_BETA = 20;
 const BJT_MAX_BETA = 300;
 const BJT_BETA_STEP = 1;
@@ -162,6 +166,38 @@ const COMPONENT_DEFS = {
       [1, 1],
     ],
     footprintHalf: { x: 2.5, y: 1.5 },
+  },
+  cccs: {
+    label: "Fonte CCCS",
+    terminals: [
+      [-2, -2],
+      [-2, 2],
+      [1, -2],
+      [1, 2],
+    ],
+    bodyHalfW: 2.3,
+    bodyHalfH: 1.9,
+    renderW: 6,
+    renderH: 4,
+    collisionBounds: { left: 3, right: 3, up: 2, down: 2 },
+    defaultValue: 1,
+    editable: true,
+    showValueLabel: false,
+    unit: "A/A",
+    obstacleCells: [
+      [-2, 0],
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [2, 0],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    footprintHalf: { x: 3.5, y: 2.5 },
   },
   resistor: {
     label: "Resistor",
@@ -643,6 +679,7 @@ const COMPONENT_ORDER = [
   "resistor",
   "voltage_source",
   "current_source",
+  "cccs",
   "ground",
   VOLTAGE_NODE_TYPE,
   "op_amp",
@@ -722,6 +759,10 @@ export {
   MOSFET_GATE_TERMINAL_INDEX,
   MOSFET_DRAIN_TERMINAL_INDEX,
   MOSFET_SOURCE_TERMINAL_INDEX,
+  CCCS_CONTROL_FROM_TERMINAL_INDEX,
+  CCCS_CONTROL_TO_TERMINAL_INDEX,
+  CCCS_OUTPUT_FROM_TERMINAL_INDEX,
+  CCCS_OUTPUT_TO_TERMINAL_INDEX,
   BJT_MIN_BETA,
   BJT_MAX_BETA,
   BJT_BETA_STEP,

@@ -617,6 +617,22 @@ function buildCurrentSourceSvg(options = {}) {
   </svg>`;
 }
 
+function buildCccsSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="40" y1="0" x2="40" y2="160"/>
+      <polygon points="112,80 160,24 208,80 160,136"/>
+      <line x1="160" y1="0" x2="160" y2="25"/>
+      <line x1="160" y1="136" x2="160" y2="160"/>
+      <line x1="40" y1="46" x2="40" y2="114"/>
+      <polyline points="28,96 40,114 52,96"/>
+      <line x1="160" y1="46" x2="160" y2="114"/>
+      <polyline points="148,96 160,114 172,96"/>
+    </g>
+  </svg>`;
+}
+
 function buildVoltageNodeSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
@@ -898,6 +914,7 @@ export {
   buildResistorSvg,
   buildVoltageSourceSvg,
   buildCurrentSourceSvg,
+  buildCccsSvg,
   buildVoltageNodeSvg,
   buildOpAmpSvg,
   buildAndGateSvg,

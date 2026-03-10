@@ -1,5 +1,9 @@
 import {
   BJT_BASE_TERMINAL_INDEX,
+  CCCS_CONTROL_FROM_TERMINAL_INDEX,
+  CCCS_CONTROL_TO_TERMINAL_INDEX,
+  CCCS_OUTPUT_FROM_TERMINAL_INDEX,
+  CCCS_OUTPUT_TO_TERMINAL_INDEX,
   COMPONENT_DEFS,
   MAX_BJT_JUNCTION_VOLTAGE_STEP,
   MAX_DIODE_VOLTAGE_STEP,
@@ -169,6 +173,7 @@ function simulateCircuit({
   const voltageSources = activeComponents.filter((component) =>
     isIdealVoltageSourceComponent(component)
   );
+  const cccsComponents = activeComponents.filter((component) => component.type === "cccs");
   const diodes = activeComponents.filter((component) => component.type === "diode");
   const zeners = activeComponents.filter((component) => component.type === "zener_diode");
   const bjts = activeComponents.filter((component) => isBjtComponentType(component));
@@ -184,8 +189,9 @@ function simulateCircuit({
 
   const N = nonGroundRoots.length;
   const M = voltageSources.length;
+  const C = cccsComponents.length;
   const O = opAmps.length + logicGates.length;
-  const size = N + M + O;
+  const size = N + M + C + O;
 
   if (size === 0) {
     return { ok: false, message: "Circuito inválido para MNA" };
@@ -199,11 +205,17 @@ function simulateCircuit({
   const linearSystem = buildLinearMnaSystem(
     activeComponents,
     voltageSources,
+    cccsComponents,
     opAmps,
     logicGates,
     rootByTerminal,
     getNodeIdx,
     N
+  );
+  const cccsRowOffset = N + M;
+  const opAmpRowOffset = N + M + C;
+  const cccsIndexById = new Map(
+    cccsComponents.map((component, index) => [component.id, index])
   );
 
   let solution = null;
@@ -225,7 +237,7 @@ function simulateCircuit({
       opAmps,
       logicGates,
       nodeCount: N,
-      opAmpRowOffset: N + M,
+      opAmpRowOffset,
       rootByTerminal,
       getNodeIdx,
       previousSolution,
@@ -266,6 +278,11 @@ function simulateCircuit({
       const current = (v0 - v1) / safeResistance(component.value);
       componentCurrents.set(component.id, current);
       componentPowers.set(component.id, safeResistance(component.value) * current * current);
+    } else if (component.type === "cccs") {
+      const cccsIndex = cccsIndexById.get(component.id);
+      const controlCurrent =
+        cccsIndex == null ? 0 : -(solution[cccsRowOffset + cccsIndex] ?? 0);
+      componentCurrents.set(component.id, (component.value || 0) * controlCurrent);
     } else if (component.type === "current_source") {
       componentCurrents.set(component.id, component.value || 0);
     } else if (component.type === "diode") {
@@ -414,13 +431,19 @@ function chooseNodeMarkerAnchor(group, preferredTerminalRef = null) {
 function buildLinearMnaSystem(
   activeComponents,
   voltageSources,
+  cccsComponents,
   opAmps,
   logicGates,
   rootByTerminal,
   getNodeIdx,
   nodeCount
 ) {
-  const size = nodeCount + voltageSources.length + opAmps.length + logicGates.length;
+  const size =
+    nodeCount +
+    voltageSources.length +
+    cccsComponents.length +
+    opAmps.length +
+    logicGates.length;
   const A = Array.from({ length: size }, () => Array(size).fill(0));
   const z = Array(size).fill(0);
 
@@ -452,21 +475,42 @@ function buildLinearMnaSystem(
     const n0 = getNodeIdx(r0);
     const n1 = getNodeIdx(r1);
 
-    if (n0 >= 0) {
-      A[n0][row] -= 1;
-      A[row][n0] -= 1;
+    stampIdealVoltageSourceBranch(A, z, row, n0, n1, component.value || 0);
+  });
+
+  cccsComponents.forEach((component, index) => {
+    const row = nodeCount + voltageSources.length + index;
+    const controlFromRoot = rootByTerminal.get(
+      terminalKey(component.id, CCCS_CONTROL_FROM_TERMINAL_INDEX)
+    );
+    const controlToRoot = rootByTerminal.get(
+      terminalKey(component.id, CCCS_CONTROL_TO_TERMINAL_INDEX)
+    );
+    const outputFromRoot = rootByTerminal.get(
+      terminalKey(component.id, CCCS_OUTPUT_FROM_TERMINAL_INDEX)
+    );
+    const outputToRoot = rootByTerminal.get(
+      terminalKey(component.id, CCCS_OUTPUT_TO_TERMINAL_INDEX)
+    );
+    const controlFromNode = getNodeIdx(controlFromRoot);
+    const controlToNode = getNodeIdx(controlToRoot);
+    const outputFromNode = getNodeIdx(outputFromRoot);
+    const outputToNode = getNodeIdx(outputToRoot);
+    const gain = component.value || 0;
+
+    stampIdealVoltageSourceBranch(A, z, row, controlFromNode, controlToNode, 0);
+
+    if (outputFromNode >= 0) {
+      A[outputFromNode][row] -= gain;
     }
 
-    if (n1 >= 0) {
-      A[n1][row] += 1;
-      A[row][n1] += 1;
+    if (outputToNode >= 0) {
+      A[outputToNode][row] += gain;
     }
-
-    z[row] = component.value || 0;
   });
 
   opAmps.forEach((component, index) => {
-    const row = nodeCount + voltageSources.length + index;
+    const row = nodeCount + voltageSources.length + cccsComponents.length + index;
     const outputRoot = rootByTerminal.get(terminalKey(component.id, OP_AMP_OUTPUT_TERMINAL_INDEX));
     const outputNode = getNodeIdx(outputRoot);
 
@@ -477,7 +521,12 @@ function buildLinearMnaSystem(
   });
 
   logicGates.forEach((component, index) => {
-    const row = nodeCount + voltageSources.length + opAmps.length + index;
+    const row =
+      nodeCount +
+      voltageSources.length +
+      cccsComponents.length +
+      opAmps.length +
+      index;
     const outputTerminalIdx =
       component.type === "not_gate" ? 1 : OP_AMP_OUTPUT_TERMINAL_INDEX;
     const outputRoot = rootByTerminal.get(terminalKey(component.id, outputTerminalIdx));
@@ -1056,6 +1105,20 @@ function stampConductance(matrix, n0, n1, conductance) {
     matrix[n0][n1] -= conductance;
     matrix[n1][n0] -= conductance;
   }
+}
+
+function stampIdealVoltageSourceBranch(matrix, vector, row, n0, n1, voltage = 0) {
+  if (n0 >= 0) {
+    matrix[n0][row] -= 1;
+    matrix[row][n0] -= 1;
+  }
+
+  if (n1 >= 0) {
+    matrix[n1][row] += 1;
+    matrix[row][n1] += 1;
+  }
+
+  vector[row] = voltage;
 }
 
 function limitCandidateJunctionVoltages(

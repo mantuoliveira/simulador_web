@@ -3,6 +3,8 @@ import {
   BJT_BETA_STEP,
   BJT_MAX_BETA,
   BJT_MIN_BETA,
+  CCCS_OUTPUT_FROM_TERMINAL_INDEX,
+  CCCS_OUTPUT_TO_TERMINAL_INDEX,
   COMPONENT_DEFS,
   MOSFET_DRAIN_TERMINAL_INDEX,
   MOSFET_GATE_TERMINAL_INDEX,
@@ -18,6 +20,7 @@ import {
 import {
   buildBjtNpnSvg,
   buildBjtPnpSvg,
+  buildCccsSvg,
   buildCurrentSourceSvg,
   buildDefaultComponentSvg,
   buildDiodeSvg,
@@ -285,6 +288,28 @@ const COMPONENT_BEHAVIORS = {
       lateralOffset: 1.45,
       textOffsetExtra:
         Math.abs(geometry.dirY) > Math.abs(geometry.dirX) ? Math.max(12, geometry.zoom * 14) : 0,
+      }),
+  },
+  cccs: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildCccsSvg(options),
+    formatValue: (component) => `k=${(component.value || 0).toFixed(1)}`,
+    formatWheelValue: (component) => `k=${(component.value || 0).toFixed(1)} A/A`,
+    valueFromNormalized: (_component, normalized) =>
+      snapToStep(-10 + 20 * clamp(normalized, 0, 1), 0.1),
+    normalizedFromValue: (component) => clamp(((component.value || 0) + 10) / 20, 0, 1),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.45),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: () => [[0, 1], [2, 3]],
+    getCurrentArrowTerminalPair: () => [
+      CCCS_OUTPUT_FROM_TERMINAL_INDEX,
+      CCCS_OUTPUT_TO_TERMINAL_INDEX,
+    ],
+    getCurrentArrowLayout: () => ({
+      sideSign: -1,
+      lateralOffset: 0.98,
+      textOffsetExtra: 0,
     }),
   },
   resistor: {
@@ -564,6 +589,14 @@ function getComponentWheelDisplay(component) {
     return {
       parameter: "I",
       ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "cccs") {
+    return {
+      parameter: "k",
+      value: (component.value || 0).toFixed(1),
+      unit: "A/A",
     };
   }
 

@@ -4,7 +4,7 @@ Aplicativo web estático para montar, editar e simular circuitos DC com foco em 
 
 ## Recursos
 
-- Componentes disponíveis: fonte de tensão, fonte de corrente, resistor, amp op, diodo, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
+- Componentes disponíveis: fonte de tensão, fonte de corrente, fonte CCCS, resistor, amp op, diodo, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
 - Canvas com grade por pontos, pan e zoom.
 - Roteamento ortogonal automático de fios.
 - Junções automáticas ao conectar em um fio existente.
