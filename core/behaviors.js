@@ -343,7 +343,20 @@ const COMPONENT_BEHAVIORS = {
       clamp((Math.log10(safeCapacitance(component.value)) + 12) / 10, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
+    supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
+    getCurrentArrowLayout: (component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        getCardinalValueLabelAnchor(component, 1.62),
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.2,
+      textOffsetExtra:
+        Math.abs(geometry.dirY) > Math.abs(geometry.dirX) ? Math.max(10, geometry.zoom * 12) : 0,
+    }),
   },
   resistor: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
