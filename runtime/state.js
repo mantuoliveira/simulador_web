@@ -104,6 +104,7 @@ const appEls = {
   themeToggleBtn: document.getElementById("theme-toggle-btn"),
   editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
   thermalBtn: document.getElementById("thermal-btn"),
+  bomBtn: document.getElementById("bom-btn"),
   groupSelectBtn: document.getElementById("group-select-btn"),
   exportBtn: document.getElementById("export-btn"),
   currentArrowBtn: document.getElementById("current-arrow-btn"),

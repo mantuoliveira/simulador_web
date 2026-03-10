@@ -449,6 +449,13 @@ button.secondary svg {
   fill: currentColor;
 }
 
+#bom-btn svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+}
+
 #group-select-btn svg {
   width: 30px;
   height: 30px;

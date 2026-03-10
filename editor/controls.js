@@ -19,6 +19,7 @@ import {
 import { applyThemeMode, updateThemeToggleButtonState } from "../runtime/ui.js";
 import { requestRender } from "../render/render.js";
 import { handleExportAction } from "../export/png.js";
+import { handleBomAction } from "../export/bom.js";
 import { buildStoredSimulationResult, runSimulation } from "../simulation/solver.js";
 import { getSelectedNodeMarker, getTerminalPosition } from "./selectors.js";
 import { getVisibleWorldBounds } from "../runtime/viewport.js";
@@ -72,6 +73,10 @@ function setupButtons() {
     const terminalRef = getTerminalLabelEditorTarget();
     if (!terminalRef) return;
     openTerminalLabelEditor(terminalRef);
+  });
+
+  appEls.bomBtn.addEventListener("click", () => {
+    handleBomAction();
   });
 
   appEls.groupSelectBtn.addEventListener("click", () => {

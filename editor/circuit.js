@@ -2080,6 +2080,7 @@ function deriveSelectionUiState() {
     showEditTerminalLabel: terminalLabelTarget != null,
     showThermal: false,
     thermalActive: false,
+    showBom: false,
     showGroupSelect: false,
     groupSelectActive: false,
     showExport: false,
@@ -2110,6 +2111,7 @@ function deriveSelectionUiState() {
     uiState.showEditTerminalLabel = false;
     uiState.showThermal = state.simulationActive && state.simulationResult?.ok;
     uiState.thermalActive = state.thermalModeActive === true;
+    uiState.showBom = canExport;
     uiState.showGroupSelect = canExport;
     uiState.showExport = canExport;
     return uiState;
@@ -2188,6 +2190,7 @@ function applySelectionUiState(uiState) {
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !uiState.showEditTerminalLabel);
   appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
   appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
+  appEls.bomBtn.classList.toggle("hidden", !uiState.showBom);
   appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);
   appEls.groupSelectBtn.classList.toggle("active", !!uiState.groupSelectActive);
   appEls.exportBtn.classList.toggle("hidden", !uiState.showExport);
