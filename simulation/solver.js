@@ -36,6 +36,7 @@ import {
   evaluateZenerModel,
   maxAbsValue,
   multiplyMatrixVector,
+  safeCapacitance,
   safeResistance,
 } from "../core/support.js";
 import { state } from "../runtime/state.js";
@@ -278,6 +279,8 @@ function simulateCircuit({
       const current = (v0 - v1) / safeResistance(component.value);
       componentCurrents.set(component.id, current);
       componentPowers.set(component.id, safeResistance(component.value) * current * current);
+    } else if (component.type === "capacitor") {
+      componentCurrents.set(component.id, 0);
     } else if (component.type === "cccs") {
       const cccsIndex = cccsIndexById.get(component.id);
       const controlCurrent =
@@ -455,6 +458,10 @@ function buildLinearMnaSystem(
 
     if (component.type === "resistor") {
       stampConductance(A, n0, n1, 1 / safeResistance(component.value));
+    }
+
+    if (component.type === "capacitor") {
+      stampConductance(A, n0, n1, safeCapacitance(component.value));
     }
 
     if (component.type === "current_source") {

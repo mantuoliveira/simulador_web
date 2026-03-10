@@ -199,6 +199,34 @@ const COMPONENT_DEFS = {
     ],
     footprintHalf: { x: 3.5, y: 2.5 },
   },
+  capacitor: {
+    label: "Capacitor",
+    terminals: [
+      [-2, 0],
+      [2, 0],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 0.95,
+    renderW: 4,
+    renderH: 2,
+    defaultValue: 1e-6,
+    editable: true,
+    unit: "F",
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    collisionBounds: { left: 2, right: 2, up: 1, down: 1 },
+    footprintExtents: { left: 2, right: 2, up: 1, down: 1 },
+    footprintHalf: { x: 2.5, y: 1.5 },
+  },
   resistor: {
     label: "Resistor",
     terminals: [
@@ -677,6 +705,7 @@ const COMPONENT_DEFS = {
 
 const COMPONENT_ORDER = [
   "resistor",
+  "capacitor",
   "voltage_source",
   "current_source",
   "cccs",

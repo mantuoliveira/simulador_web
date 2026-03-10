@@ -20,6 +20,7 @@ import {
 import {
   buildBjtNpnSvg,
   buildBjtPnpSvg,
+  buildCapacitorSvg,
   buildCccsSvg,
   buildCurrentSourceSvg,
   buildDefaultComponentSvg,
@@ -38,7 +39,9 @@ import {
   buildVoltageSourceSvg,
   clamp,
   formatCurrent,
+  formatEngineeringValue,
   formatEngineeringValueFixed,
+  safeCapacitance,
   formatTransconductance,
   formatResistance,
   formatSymmetricVoltage,
@@ -233,6 +236,23 @@ function createBjtBehavior(svgBuilder) {
   };
 }
 
+function quantizeCapacitor(value) {
+  if (!Number.isFinite(value) || value <= 0) return 1e-6;
+  const decades = [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+  const exponent = Math.floor(Math.log10(value));
+  const mantissa = value / Math.pow(10, exponent);
+  let best = decades[0];
+  let bestErr = Infinity;
+  for (const d of decades) {
+    const err = Math.abs(d - mantissa);
+    if (err < bestErr) {
+      bestErr = err;
+      best = d;
+    }
+  }
+  return clamp(best * Math.pow(10, exponent), 1e-12, 0.01);
+}
+
 const COMPONENT_BEHAVIORS = {
   voltage_source: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
@@ -311,6 +331,19 @@ const COMPONENT_BEHAVIORS = {
       lateralOffset: 1.98,
       textOffsetExtra: 0,
     }),
+  },
+  capacitor: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    buildSvg: (options = {}) => buildCapacitorSvg(options),
+    formatValue: (component) => formatEngineeringValue(component.value, "F"),
+    formatWheelValue: (component) => `C=${formatEngineeringValueFixed(component.value, "F", 1)}`,
+    valueFromNormalized: (_component, normalized) =>
+      quantizeCapacitor(Math.pow(10, -12 + 10 * clamp(normalized, 0, 1))),
+    normalizedFromValue: (component) =>
+      clamp((Math.log10(safeCapacitance(component.value)) + 12) / 10, 0, 1),
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1]],
   },
   resistor: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
@@ -604,6 +637,14 @@ function getComponentWheelDisplay(component) {
     const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "Ω", 1));
     return {
       parameter: "R",
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "capacitor") {
+    const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "F", 1));
+    return {
+      parameter: "C",
       ...valueAndUnit,
     };
   }

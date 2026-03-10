@@ -34,6 +34,11 @@ function safeResistance(value) {
   return Math.max(1e-9, value);
 }
 
+function safeCapacitance(value) {
+  if (!Number.isFinite(value)) return 1e-6;
+  return Math.max(1e-12, value);
+}
+
 function safeOpAmpSupply(value) {
   if (!Number.isFinite(value)) return OP_AMP_MIN_SUPPLY;
   return Math.max(1e-6, Math.abs(value));
@@ -571,6 +576,20 @@ function buildDefaultComponentSvg(options = {}) {
   </svg>`;
 }
 
+function buildCapacitorSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="40" x2="66" y2="40"/>
+      <line x1="66" y1="18" x2="66" y2="62"/>
+      <path d="M 94,18 Q 78,40 94,62"/>
+      <line x1="88" y1="40" x2="160" y2="40"/>
+      <line x1="38" y1="26" x2="50" y2="26"/>
+      <line x1="44" y1="20" x2="44" y2="32"/>
+    </g>
+  </svg>`;
+}
+
 function buildResistorSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 80">
@@ -911,6 +930,8 @@ export {
   buildOpAmpMarkerSvg,
   getSpriteThemeColors,
   buildDefaultComponentSvg,
+  safeCapacitance,
+  buildCapacitorSvg,
   buildResistorSvg,
   buildVoltageSourceSvg,
   buildCurrentSourceSvg,
