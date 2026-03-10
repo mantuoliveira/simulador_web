@@ -81,6 +81,154 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
   swapControl: null,
 };
 
+function createMosfetBehavior(svgBuilder, wheelTitle) {
+  return {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      k: 0.01,
+      vt: 2,
+      activeEditableParam: "k",
+      drainSourceSwapped: false,
+    }),
+    buildSvg: (options = {}) => svgBuilder(options),
+    formatValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatVoltage(component.vt)}`
+        : `k=${formatTransconductance(component.k)}`,
+    formatWheelValue: (component) =>
+      component.activeEditableParam === "vt"
+        ? `Vt=${formatEngineeringValueFixed(component.vt, "V", 1)}`
+        : `k=${formatEngineeringValueFixed(component.k, "A/V²", 1)}`,
+    getWheelTitle: () => wheelTitle,
+    valueFromNormalized: (component, normalized) => {
+      const clamped = clamp(normalized, 0, 1);
+      if (component.activeEditableParam === "vt") {
+        return roundTo(0.5 + 4.5 * clamped, 2);
+      }
+
+      return roundTo(Math.pow(10, -3 + 2 * clamped), 6);
+    },
+    normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "vt") {
+        return clamp((component.vt - 0.5) / 4.5, 0, 1);
+      }
+
+      const safe = clamp(component.k, 0.001, 0.1);
+      return clamp((Math.log10(safe) + 3) / 2, 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "vt") {
+        component.vt = value;
+        return;
+      }
+
+      component.k = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "k";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam = component.activeEditableParam === "vt" ? "k" : "vt";
+      return true;
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: () => [],
+    getCurrentArrowTerminalPair: (component) => {
+      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
+      return [drainIndex, sourceIndex];
+    },
+    getCurrentArrowLayout: (_component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        geometry.baseTerminalPoint,
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.drainSourceSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar source e drain",
+      ariaLabel: "Trocar source e drain",
+      toggle(component) {
+        component.drainSourceSwapped = !component.drainSourceSwapped;
+        return "Source e drain trocados";
+      },
+    },
+  };
+}
+
+function createBjtBehavior(svgBuilder) {
+  return {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({ collectorEmitterSwapped: false }),
+    buildSvg: (options = {}) => svgBuilder(options),
+    formatValue: (component) => `β=${Math.round(component.value)}`,
+    formatWheelValue: (component) => `β=${component.value.toFixed(1)}`,
+    valueFromNormalized: (_component, normalized) =>
+      snapToStep(
+        BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
+        BJT_BETA_STEP
+      ),
+    normalizedFromValue: (component) => {
+      const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
+      return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
+    },
+    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
+    isSimulatedBranch: true,
+    supportsCurrentArrow: true,
+    getReachabilityTerminalPairs: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [
+        [BJT_BASE_TERMINAL_INDEX, collectorIndex],
+        [BJT_BASE_TERMINAL_INDEX, emitterIndex],
+        [collectorIndex, emitterIndex],
+      ];
+    },
+    allowsIntraComponentConnection: (component, firstTerminalIndex, secondTerminalIndex) => {
+      const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+      return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
+    },
+    getCurrentArrowTerminalPair: (component) => {
+      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
+      return [collectorIndex, emitterIndex];
+    },
+    getCurrentArrowLayout: (_component, geometry) => ({
+      sideSign: getPointProjectionSideSign(
+        geometry.baseTerminalPoint,
+        geometry.midX,
+        geometry.midY,
+        geometry.normalX,
+        geometry.normalY
+      ),
+      lateralOffset: 1.08,
+      textOffsetExtra: 0,
+    }),
+    applySpriteTransform: (context, component) => {
+      if (component.collectorEmitterSwapped === true) {
+        context.scale(1, -1);
+      }
+    },
+    swapControl: {
+      title: "Trocar coletor e emissor",
+      ariaLabel: "Trocar coletor e emissor",
+      toggle(component) {
+        component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
+        return "Coletor e emissor trocados";
+      },
+    },
+  };
+}
+
 const COMPONENT_BEHAVIORS = {
   voltage_source: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
@@ -328,290 +476,10 @@ const COMPONENT_BEHAVIORS = {
       textOffsetExtra: 0,
     }),
   },
-  mosfet_n: {
-    ...DEFAULT_COMPONENT_BEHAVIOR,
-    createState: () => ({
-      k: 0.01,
-      vt: 2,
-      activeEditableParam: "k",
-      drainSourceSwapped: false,
-    }),
-    buildSvg: (options = {}) => buildMosfetNSvg(options),
-    formatValue: (component) =>
-      component.activeEditableParam === "vt"
-        ? `Vt=${formatVoltage(component.vt)}`
-        : `k=${formatTransconductance(component.k)}`,
-    formatWheelValue: (component) =>
-      component.activeEditableParam === "vt"
-        ? `Vt=${formatEngineeringValueFixed(component.vt, "V", 1)}`
-        : `k=${formatEngineeringValueFixed(component.k, "A/V²", 1)}`,
-    getWheelTitle: () => "MOSFET N",
-    valueFromNormalized: (component, normalized) => {
-      const clamped = clamp(normalized, 0, 1);
-      if (component.activeEditableParam === "vt") {
-        return roundTo(0.5 + 4.5 * clamped, 2);
-      }
-
-      return roundTo(Math.pow(10, -3 + 2 * clamped), 6);
-    },
-    normalizedFromValue: (component) => {
-      if (component.activeEditableParam === "vt") {
-        return clamp((component.vt - 0.5) / 4.5, 0, 1);
-      }
-
-      const safe = clamp(component.k, 0.001, 0.1);
-      return clamp((Math.log10(safe) + 3) / 2, 0, 1);
-    },
-    setEditableValue(component, value) {
-      if (component.activeEditableParam === "vt") {
-        component.vt = value;
-        return;
-      }
-
-      component.k = value;
-    },
-    resetEditableParameter(component) {
-      component.activeEditableParam = "k";
-    },
-    toggleEditableParameter(component) {
-      component.activeEditableParam = component.activeEditableParam === "vt" ? "k" : "vt";
-      return true;
-    },
-    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
-    isSimulatedBranch: true,
-    supportsCurrentArrow: true,
-    getReachabilityTerminalPairs: () => [],
-    getCurrentArrowTerminalPair: (component) => {
-      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
-      return [drainIndex, sourceIndex];
-    },
-    getCurrentArrowLayout: (_component, geometry) => ({
-      sideSign: getPointProjectionSideSign(
-        geometry.baseTerminalPoint,
-        geometry.midX,
-        geometry.midY,
-        geometry.normalX,
-        geometry.normalY
-      ),
-      lateralOffset: 1.08,
-      textOffsetExtra: 0,
-    }),
-    applySpriteTransform: (context, component) => {
-      if (component.drainSourceSwapped === true) {
-        context.scale(1, -1);
-      }
-    },
-    swapControl: {
-      title: "Trocar source e drain",
-      ariaLabel: "Trocar source e drain",
-      toggle(component) {
-        component.drainSourceSwapped = !component.drainSourceSwapped;
-        return "Source e drain trocados";
-      },
-    },
-  },
-  mosfet_p: {
-    ...DEFAULT_COMPONENT_BEHAVIOR,
-    createState: () => ({
-      k: 0.01,
-      vt: 2,
-      activeEditableParam: "k",
-      drainSourceSwapped: false,
-    }),
-    buildSvg: (options = {}) => buildMosfetPSvg(options),
-    formatValue: (component) =>
-      component.activeEditableParam === "vt"
-        ? `Vt=${formatVoltage(component.vt)}`
-        : `k=${formatTransconductance(component.k)}`,
-    formatWheelValue: (component) =>
-      component.activeEditableParam === "vt"
-        ? `Vt=${formatEngineeringValueFixed(component.vt, "V", 1)}`
-        : `k=${formatEngineeringValueFixed(component.k, "A/V²", 1)}`,
-    getWheelTitle: () => "MOSFET P",
-    valueFromNormalized: (component, normalized) => {
-      const clamped = clamp(normalized, 0, 1);
-      if (component.activeEditableParam === "vt") {
-        return roundTo(0.5 + 4.5 * clamped, 2);
-      }
-
-      return roundTo(Math.pow(10, -3 + 2 * clamped), 6);
-    },
-    normalizedFromValue: (component) => {
-      if (component.activeEditableParam === "vt") {
-        return clamp((component.vt - 0.5) / 4.5, 0, 1);
-      }
-
-      const safe = clamp(component.k, 0.001, 0.1);
-      return clamp((Math.log10(safe) + 3) / 2, 0, 1);
-    },
-    setEditableValue(component, value) {
-      if (component.activeEditableParam === "vt") {
-        component.vt = value;
-        return;
-      }
-
-      component.k = value;
-    },
-    resetEditableParameter(component) {
-      component.activeEditableParam = "k";
-    },
-    toggleEditableParameter(component) {
-      component.activeEditableParam = component.activeEditableParam === "vt" ? "k" : "vt";
-      return true;
-    },
-    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
-    isSimulatedBranch: true,
-    supportsCurrentArrow: true,
-    getReachabilityTerminalPairs: () => [],
-    getCurrentArrowTerminalPair: (component) => {
-      const { drainIndex, sourceIndex } = getMosfetDrainSourceTerminalIndices(component);
-      return [drainIndex, sourceIndex];
-    },
-    getCurrentArrowLayout: (_component, geometry) => ({
-      sideSign: getPointProjectionSideSign(
-        geometry.baseTerminalPoint,
-        geometry.midX,
-        geometry.midY,
-        geometry.normalX,
-        geometry.normalY
-      ),
-      lateralOffset: 1.08,
-      textOffsetExtra: 0,
-    }),
-    applySpriteTransform: (context, component) => {
-      if (component.drainSourceSwapped === true) {
-        context.scale(1, -1);
-      }
-    },
-    swapControl: {
-      title: "Trocar source e drain",
-      ariaLabel: "Trocar source e drain",
-      toggle(component) {
-        component.drainSourceSwapped = !component.drainSourceSwapped;
-        return "Source e drain trocados";
-      },
-    },
-  },
-  bjt_npn: {
-    ...DEFAULT_COMPONENT_BEHAVIOR,
-    createState: () => ({ collectorEmitterSwapped: false }),
-    buildSvg: (options = {}) => buildBjtNpnSvg(options),
-    formatValue: (component) => `β=${Math.round(component.value)}`,
-    formatWheelValue: (component) => `β=${component.value.toFixed(1)}`,
-    valueFromNormalized: (_component, normalized) =>
-      snapToStep(
-        BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
-        BJT_BETA_STEP
-      ),
-    normalizedFromValue: (component) => {
-      const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
-      return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
-    },
-    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
-    isSimulatedBranch: true,
-    supportsCurrentArrow: true,
-    getReachabilityTerminalPairs: (component) => {
-      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      return [
-        [BJT_BASE_TERMINAL_INDEX, collectorIndex],
-        [BJT_BASE_TERMINAL_INDEX, emitterIndex],
-        [collectorIndex, emitterIndex],
-      ];
-    },
-    allowsIntraComponentConnection: (component, firstTerminalIndex, secondTerminalIndex) => {
-      const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
-      return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
-    },
-    getCurrentArrowTerminalPair: (component) => {
-      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      return [collectorIndex, emitterIndex];
-    },
-    getCurrentArrowLayout: (_component, geometry) => ({
-      sideSign: getPointProjectionSideSign(
-        geometry.baseTerminalPoint,
-        geometry.midX,
-        geometry.midY,
-        geometry.normalX,
-        geometry.normalY
-      ),
-      lateralOffset: 1.08,
-      textOffsetExtra: 0,
-    }),
-    applySpriteTransform: (context, component) => {
-      if (component.collectorEmitterSwapped === true) {
-        context.scale(1, -1);
-      }
-    },
-    swapControl: {
-      title: "Trocar coletor e emissor",
-      ariaLabel: "Trocar coletor e emissor",
-      toggle(component) {
-        component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
-        return "Coletor e emissor trocados";
-      },
-    },
-  },
-  bjt_pnp: {
-    ...DEFAULT_COMPONENT_BEHAVIOR,
-    createState: () => ({ collectorEmitterSwapped: false }),
-    buildSvg: (options = {}) => buildBjtPnpSvg(options),
-    formatValue: (component) => `β=${Math.round(component.value)}`,
-    formatWheelValue: (component) => `β=${component.value.toFixed(1)}`,
-    valueFromNormalized: (_component, normalized) =>
-      snapToStep(
-        BJT_MIN_BETA + (BJT_MAX_BETA - BJT_MIN_BETA) * clamp(normalized, 0, 1),
-        BJT_BETA_STEP
-      ),
-    normalizedFromValue: (component) => {
-      const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
-      return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
-    },
-    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
-    isSimulatedBranch: true,
-    supportsCurrentArrow: true,
-    getReachabilityTerminalPairs: (component) => {
-      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      return [
-        [BJT_BASE_TERMINAL_INDEX, collectorIndex],
-        [BJT_BASE_TERMINAL_INDEX, emitterIndex],
-        [collectorIndex, emitterIndex],
-      ];
-    },
-    allowsIntraComponentConnection: (component, firstTerminalIndex, secondTerminalIndex) => {
-      const { collectorIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
-      return terminalPair.has(BJT_BASE_TERMINAL_INDEX) && terminalPair.has(collectorIndex);
-    },
-    getCurrentArrowTerminalPair: (component) => {
-      const { collectorIndex, emitterIndex } = getBjtCollectorEmitterTerminalIndices(component);
-      return [collectorIndex, emitterIndex];
-    },
-    getCurrentArrowLayout: (_component, geometry) => ({
-      sideSign: getPointProjectionSideSign(
-        geometry.baseTerminalPoint,
-        geometry.midX,
-        geometry.midY,
-        geometry.normalX,
-        geometry.normalY
-      ),
-      lateralOffset: 1.08,
-      textOffsetExtra: 0,
-    }),
-    applySpriteTransform: (context, component) => {
-      if (component.collectorEmitterSwapped === true) {
-        context.scale(1, -1);
-      }
-    },
-    swapControl: {
-      title: "Trocar coletor e emissor",
-      ariaLabel: "Trocar coletor e emissor",
-      toggle(component) {
-        component.collectorEmitterSwapped = !component.collectorEmitterSwapped;
-        return "Coletor e emissor trocados";
-      },
-    },
-  },
+  mosfet_n: createMosfetBehavior(buildMosfetNSvg, "MOSFET N"),
+  mosfet_p: createMosfetBehavior(buildMosfetPSvg, "MOSFET P"),
+  bjt_npn: createBjtBehavior(buildBjtNpnSvg),
+  bjt_pnp: createBjtBehavior(buildBjtPnpSvg),
   ground: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildGroundSvg(options),
