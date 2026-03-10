@@ -456,6 +456,12 @@ button.secondary svg {
   stroke: currentColor;
 }
 
+#png-btn {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 #group-select-btn svg {
   width: 30px;
   height: 30px;

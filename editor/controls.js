@@ -20,6 +20,7 @@ import { applyThemeMode, updateThemeToggleButtonState } from "../runtime/ui.js";
 import { requestRender } from "../render/render.js";
 import { handleExportAction } from "../export/png.js";
 import { handleBomAction } from "../export/bom.js";
+import { exportCircuitJson, importCircuitJson, handleImportFileChange } from "../export/circuit-json.js";
 import { buildStoredSimulationResult, runSimulation } from "../simulation/solver.js";
 import { getSelectedNodeMarker, getTerminalPosition } from "./selectors.js";
 import { getVisibleWorldBounds } from "../runtime/viewport.js";
@@ -251,7 +252,17 @@ function setupDeleteButtonGestures() {
 }
 
 function setupExportButtonGestures() {
-  appEls.exportBtn.addEventListener("click", (event) => {
+  appEls.exportBtn.addEventListener("click", () => {
+    exportCircuitJson();
+  });
+
+  appEls.importBtn.addEventListener("click", () => {
+    importCircuitJson();
+  });
+
+  appEls.importFileInput.addEventListener("change", handleImportFileChange);
+
+  appEls.pngBtn.addEventListener("click", (event) => {
     if (exportButtonHoldState.suppressNextClick) {
       exportButtonHoldState.suppressNextClick = false;
       event.preventDefault();
@@ -261,7 +272,7 @@ function setupExportButtonGestures() {
     void handleExportAction({ background: "white" });
   });
 
-  appEls.exportBtn.addEventListener("pointerdown", (event) => {
+  appEls.pngBtn.addEventListener("pointerdown", (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (state.components.length === 0) return;
 
@@ -274,9 +285,9 @@ function setupExportButtonGestures() {
     }, EXPORT_BUTTON_HOLD_MS);
   });
 
-  appEls.exportBtn.addEventListener("pointerup", clearExportButtonHold);
-  appEls.exportBtn.addEventListener("pointerleave", clearExportButtonHold);
-  appEls.exportBtn.addEventListener("pointercancel", clearExportButtonHold);
+  appEls.pngBtn.addEventListener("pointerup", clearExportButtonHold);
+  appEls.pngBtn.addEventListener("pointerleave", clearExportButtonHold);
+  appEls.pngBtn.addEventListener("pointercancel", clearExportButtonHold);
 }
 
 function clearExportButtonHold() {

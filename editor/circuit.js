@@ -2081,9 +2081,11 @@ function deriveSelectionUiState() {
     showThermal: false,
     thermalActive: false,
     showBom: false,
+    showImport: false,
     showGroupSelect: false,
     groupSelectActive: false,
     showExport: false,
+    showPng: false,
     showCurrentArrow: false,
     showRotate: false,
     showDelete: false,
@@ -2102,6 +2104,7 @@ function deriveSelectionUiState() {
     uiState.showGroupSelect = canExport;
     uiState.groupSelectActive = true;
     uiState.showExport = canExport && !hasGroupedComponents;
+    uiState.showPng = canExport && !hasGroupedComponents;
     return uiState;
   }
 
@@ -2112,8 +2115,10 @@ function deriveSelectionUiState() {
     uiState.showThermal = state.simulationActive && state.simulationResult?.ok;
     uiState.thermalActive = state.thermalModeActive === true;
     uiState.showBom = canExport;
+    uiState.showImport = true;
     uiState.showGroupSelect = canExport;
     uiState.showExport = canExport;
+    uiState.showPng = canExport;
     return uiState;
   }
 
@@ -2191,9 +2196,11 @@ function applySelectionUiState(uiState) {
   appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
   appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
   appEls.bomBtn.classList.toggle("hidden", !uiState.showBom);
+  appEls.importBtn.classList.toggle("hidden", !uiState.showImport);
   appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);
   appEls.groupSelectBtn.classList.toggle("active", !!uiState.groupSelectActive);
   appEls.exportBtn.classList.toggle("hidden", !uiState.showExport);
+  appEls.pngBtn.classList.toggle("hidden", !uiState.showPng);
   appEls.currentArrowBtn.classList.toggle("hidden", !uiState.showCurrentArrow);
   appEls.rotateBtn.classList.toggle("hidden", !uiState.showRotate);
   appEls.deleteBtn.classList.toggle("hidden", !uiState.showDelete);

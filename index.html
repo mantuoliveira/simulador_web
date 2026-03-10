@@ -190,17 +190,37 @@
             </svg>
           </button>
           <button
+            id="import-btn"
+            class="secondary hidden"
+            type="button"
+            title="Importar circuito (JSON)"
+            aria-label="Importar circuito"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15l4-4h-3V4h-2v7H8l4 4zm-7 0h2v4h10v-4h2v6H5v-6z"/>
+            </svg>
+          </button>
+          <button
             id="export-btn"
             class="secondary hidden"
             type="button"
-            title="Exportar PNG"
-            aria-label="Exportar PNG"
+            title="Exportar circuito (JSON)"
+            aria-label="Exportar circuito"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
                 d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 12h2v4h10v-4h2v6H5v-6z"
               />
             </svg>
+          </button>
+          <button
+            id="png-btn"
+            class="secondary hidden"
+            type="button"
+            title="Exportar PNG"
+            aria-label="Exportar PNG"
+          >
+            PNG
           </button>
           <button
             id="current-arrow-btn"
@@ -235,6 +255,7 @@
       </footer>
     </div>
 
+    <input id="import-file-input" type="file" accept=".json,application/json" style="display:none" aria-hidden="true">
     <script type="module" src="app-bootstrap.js"></script>
   </body>
 </html>
