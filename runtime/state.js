@@ -25,6 +25,7 @@ const state = {
   defaultHiddenNodeMarkerRoots: new Set(),
   preferredComponentRotations: new Map(),
   preferredComponentParams: new Map(),
+  preferredComponentPositions: new Map(),
   camera: {
     offsetX: 0,
     offsetY: 0,

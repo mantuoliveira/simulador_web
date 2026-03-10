@@ -245,6 +245,7 @@ function addComponent(type) {
     return;
   }
 
+  state.preferredComponentPositions.set(type, { x: spot.x, y: spot.y });
   selectComponent(result.component.id);
   onCircuitChanged();
 }
@@ -421,7 +422,6 @@ function findEmptySpot(type) {
   const def = COMPONENT_DEFS[type];
   if (!def) return null;
 
-  const center = screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
   const visible = getVisibleWorldBounds();
   const margin = 1;
   const preferredRotation = getDefaultComponentRotation(type);
@@ -434,8 +434,18 @@ function findEmptySpot(type) {
 
   if (minX > maxX || minY > maxY) return null;
 
-  const baseX = clamp(Math.round(center.x), minX, maxX);
-  const baseY = clamp(Math.round(center.y), minY, maxY);
+  const lastPos = state.preferredComponentPositions.get(type);
+  const lastPosVisible =
+    lastPos != null &&
+    lastPos.x >= minX && lastPos.x <= maxX &&
+    lastPos.y >= minY && lastPos.y <= maxY;
+
+  const anchor = lastPosVisible
+    ? lastPos
+    : screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
+
+  const baseX = clamp(Math.round(anchor.x), minX, maxX);
+  const baseY = clamp(Math.round(anchor.y), minY, maxY);
 
   const candidate = { id: -1, type, x: baseX, y: baseY, rotation: preferredRotation };
   const searchPaddingValues = [2, 0];
