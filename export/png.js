@@ -1,4 +1,4 @@
-import { THEME_PALETTE_DEFAULTS } from "../core/constants.js";
+import { GRID_SIZE, THEME_PALETTE_DEFAULTS } from "../core/constants.js";
 import {
   appEls,
   createRenderTarget,
@@ -8,10 +8,13 @@ import {
 import { createSpriteMap } from "../runtime/ui.js";
 import { drawScene } from "../render/render.js";
 import { showStatus } from "../editor/ui.js";
+import { getComponentRenderBounds } from "../core/model.js";
 
 const EXPORT_FILENAME_PREFIX = "circuito";
 const EXPORT_TRIM_PADDING_PX = 12;
 const EXPORT_SCALE = 3;
+const EXPORT_ZOOM = 1.0;
+const EXPORT_WORLD_PADDING = 2;
 let exportLightSpriteMapPromise = null;
 
 function getExportThemePalette() {
@@ -45,31 +48,80 @@ async function handleExportAction({ background = "white" } = {}) {
   }
 }
 
+function computeCircuitWorldBounds() {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const component of state.components) {
+    const b = getComponentRenderBounds(component);
+    if (b.left < minX) minX = b.left;
+    if (b.top < minY) minY = b.top;
+    if (b.right > maxX) maxX = b.right;
+    if (b.bottom > maxY) maxY = b.bottom;
+  }
+
+  for (const wire of state.wires) {
+    for (const pt of wire.path) {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+  }
+
+  if (!isFinite(minX)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
 async function exportCircuitBlob({ background = "white" } = {}) {
-  const width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
-  const height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
+  const bounds = computeCircuitWorldBounds();
   const exportDpr = Math.max(1, EXPORT_SCALE);
   const exportThemePalette = getExportThemePalette();
   const exportSpriteMap = await getExportLightSpriteMap();
-  const exportCanvas = createAlphaCanvas();
-  const exportRenderTarget = createRenderTarget(exportCanvas, {
-    width,
-    height,
-    dpr: exportDpr,
-  });
-  resizeRenderTarget(exportRenderTarget, width, height, exportDpr);
 
-  drawScene(
-    {
-      background: "transparent",
-      showGrid: false,
-      showSelection: false,
-      showPendingTerminal: false,
-      themePalette: exportThemePalette,
-      spriteMap: exportSpriteMap,
-    },
-    exportRenderTarget
-  );
+  let width, height, exportOffsetX, exportOffsetY;
+  if (bounds) {
+    const p = EXPORT_WORLD_PADDING;
+    width = Math.max(1, Math.ceil((bounds.maxX - bounds.minX + 2 * p) * GRID_SIZE * EXPORT_ZOOM));
+    height = Math.max(1, Math.ceil((bounds.maxY - bounds.minY + 2 * p) * GRID_SIZE * EXPORT_ZOOM));
+    exportOffsetX = (p - bounds.minX) * GRID_SIZE * EXPORT_ZOOM;
+    exportOffsetY = (p - bounds.minY) * GRID_SIZE * EXPORT_ZOOM;
+  } else {
+    width = Math.max(1, Math.floor(appEls.canvas.clientWidth));
+    height = Math.max(1, Math.floor(appEls.canvas.clientHeight));
+    exportOffsetX = state.camera.offsetX;
+    exportOffsetY = state.camera.offsetY;
+  }
+
+  const savedCamera = { zoom: state.camera.zoom, offsetX: state.camera.offsetX, offsetY: state.camera.offsetY };
+  state.camera.zoom = EXPORT_ZOOM;
+  state.camera.offsetX = exportOffsetX;
+  state.camera.offsetY = exportOffsetY;
+
+  let exportCanvas;
+  try {
+    exportCanvas = createAlphaCanvas();
+    const exportRenderTarget = createRenderTarget(exportCanvas, { width, height, dpr: exportDpr });
+    resizeRenderTarget(exportRenderTarget, width, height, exportDpr);
+
+    drawScene(
+      {
+        background: "transparent",
+        showGrid: false,
+        showSelection: false,
+        showPendingTerminal: false,
+        themePalette: exportThemePalette,
+        spriteMap: exportSpriteMap,
+      },
+      exportRenderTarget
+    );
+  } finally {
+    state.camera.zoom = savedCamera.zoom;
+    state.camera.offsetX = savedCamera.offsetX;
+    state.camera.offsetY = savedCamera.offsetY;
+  }
 
   const trimmedCanvas = trimCanvas(exportCanvas, Math.ceil(exportDpr * EXPORT_TRIM_PADDING_PX));
   const finalCanvas =
@@ -264,8 +316,11 @@ export {
   EXPORT_FILENAME_PREFIX,
   EXPORT_TRIM_PADDING_PX,
   EXPORT_SCALE,
+  EXPORT_ZOOM,
+  EXPORT_WORLD_PADDING,
   handleExportAction,
   exportCircuitBlob,
+  computeCircuitWorldBounds,
   getExportThemePalette,
   getExportLightSpriteMap,
   waitForImageLoad,
