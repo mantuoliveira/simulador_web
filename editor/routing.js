@@ -9,6 +9,7 @@ import {
   getTerminalPositionForComponents,
   key,
   manhattan,
+  oppositeDirection,
   parsePathStateKey,
   pathStateKey,
   stepDirection,
@@ -30,7 +31,14 @@ function routeWireInCircuit(circuit, start, end, options = {}) {
   const occupiedEdges = buildOccupiedEdgeSetForWires(circuit.wires, options.ignoreWireIds);
   const bounds = routeBoundsForComponents(circuit.components, start, end);
 
-  return findPathAStar(start, end, blocked, occupiedEdges, bounds);
+  const route = findPathAStar(start, end, blocked, occupiedEdges, bounds, options);
+  if (route) return route;
+
+  if (options.startDirection || options.endDirection) {
+    return findPathAStar(start, end, blocked, occupiedEdges, bounds, {});
+  }
+
+  return null;
 }
 
 function routeWire(start, end, options = {}) {
@@ -63,9 +71,35 @@ function routeBounds(start, end) {
   return routeBoundsForComponents(state.components, start, end);
 }
 
-function findPathAStar(start, end, blocked, occupiedEdges, bounds) {
+function getNeighborInDirection(point, direction) {
+  if (direction === "right") return { x: point.x + 1, y: point.y };
+  if (direction === "left") return { x: point.x - 1, y: point.y };
+  if (direction === "down") return { x: point.x, y: point.y + 1 };
+  if (direction === "up") return { x: point.x, y: point.y - 1 };
+  return null;
+}
+
+function findPathAStar(start, end, blocked, occupiedEdges, bounds, options = {}) {
+  const { startDirection, endDirection } = options;
   const endKey = key(end.x, end.y);
-  const startStateKey = pathStateKey(start, null);
+  const startKey = key(start.x, start.y);
+
+  const startDirNeighbor = startDirection ? getNeighborInDirection(start, startDirection) : null;
+  const forceStartDir =
+    startDirNeighbor != null &&
+    isPointWithinRouteBounds(startDirNeighbor, bounds) &&
+    (!blocked.has(key(startDirNeighbor.x, startDirNeighbor.y)) ||
+      key(startDirNeighbor.x, startDirNeighbor.y) === endKey);
+
+  const endApproachCell = endDirection
+    ? getNeighborInDirection(end, oppositeDirection(endDirection))
+    : null;
+  const forceEndDir =
+    endApproachCell != null &&
+    isPointWithinRouteBounds(endApproachCell, bounds) &&
+    !blocked.has(key(endApproachCell.x, endApproachCell.y));
+
+  const startStateKey = pathStateKey(start, startDirection ?? null);
   const open = new Set([startStateKey]);
   const cameFrom = new Map();
   const gScore = new Map([[startStateKey, 0]]);
@@ -92,6 +126,15 @@ function findPathAStar(start, end, blocked, occupiedEdges, bounds) {
       if (blocked.has(nk) && nk !== endKey) continue;
 
       const nextDirection = stepDirection(current, next);
+
+      if (forceStartDir && key(current.x, current.y) === startKey && nextDirection !== startDirection) {
+        continue;
+      }
+
+      if (forceEndDir && nk === endKey && nextDirection !== endDirection) {
+        continue;
+      }
+
       const nextStateKey = pathStateKey(next, nextDirection);
       const turnCost =
         currentState.direction && currentState.direction !== nextDirection ? TURN_PENALTY : 0;
@@ -292,6 +335,7 @@ export {
   routeBoundsForComponents,
   routeBounds,
   findPathAStar,
+  getNeighborInDirection,
   buildBlockedCellSetForComponents,
   findLowestScoreStateKey,
   getOrthogonalNeighbors,
