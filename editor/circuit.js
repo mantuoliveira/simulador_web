@@ -2082,6 +2082,7 @@ function deriveSelectionUiState() {
     thermalActive: false,
     showBom: false,
     showImport: false,
+    showMore: false,
     showGroupSelect: false,
     groupSelectActive: false,
     showExport: false,
@@ -2105,6 +2106,7 @@ function deriveSelectionUiState() {
     uiState.groupSelectActive = true;
     uiState.showExport = canExport && !hasGroupedComponents;
     uiState.showPng = canExport && !hasGroupedComponents;
+    uiState.showMore = uiState.showExport || uiState.showPng;
     return uiState;
   }
 
@@ -2116,9 +2118,10 @@ function deriveSelectionUiState() {
     uiState.thermalActive = state.thermalModeActive === true;
     uiState.showBom = canExport;
     uiState.showImport = true;
-    uiState.showGroupSelect = canExport;
     uiState.showExport = canExport;
     uiState.showPng = canExport;
+    uiState.showMore = true;
+    uiState.showGroupSelect = canExport;
     return uiState;
   }
 
@@ -2195,6 +2198,8 @@ function applySelectionUiState(uiState) {
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !uiState.showEditTerminalLabel);
   appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
   appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
+  appEls.moreBtn.classList.toggle("hidden", !uiState.showMore);
+  if (!uiState.showMore) appEls.managerialActions.classList.remove("open");
   appEls.bomBtn.classList.toggle("hidden", !uiState.showBom);
   appEls.importBtn.classList.toggle("hidden", !uiState.showImport);
   appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);

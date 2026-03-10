@@ -76,6 +76,22 @@ function setupButtons() {
     openTerminalLabelEditor(terminalRef);
   });
 
+  appEls.moreBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = appEls.managerialActions.classList.toggle("open");
+    appEls.moreBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  });
+
+  appEls.managerialActions.addEventListener("click", () => {
+    appEls.managerialActions.classList.remove("open");
+    appEls.moreBtn.setAttribute("aria-expanded", "false");
+  });
+
+  document.addEventListener("click", () => {
+    appEls.managerialActions.classList.remove("open");
+    appEls.moreBtn.setAttribute("aria-expanded", "false");
+  });
+
   appEls.bomBtn.addEventListener("click", () => {
     handleBomAction();
   });

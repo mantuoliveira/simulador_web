@@ -176,52 +176,67 @@
             </svg>
           </button>
           <button
-            id="bom-btn"
+            id="more-btn"
             class="secondary hidden"
             type="button"
-            title="Lista de Materiais (BOM)"
-            aria-label="Lista de Materiais"
+            title="Mais ações"
+            aria-label="Mais ações"
+            aria-haspopup="true"
+            aria-expanded="false"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="4.5" y="2" width="15" height="20" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <line x1="8" y1="8.5" x2="16" y2="8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <line x1="8" y1="15.5" x2="13" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="5" cy="12" r="2" fill="currentColor"/>
+              <circle cx="12" cy="12" r="2" fill="currentColor"/>
+              <circle cx="19" cy="12" r="2" fill="currentColor"/>
             </svg>
           </button>
-          <button
-            id="import-btn"
-            class="secondary hidden"
-            type="button"
-            title="Importar circuito (JSON)"
-            aria-label="Importar circuito"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15l4-4h-3V4h-2v7H8l4 4zm-7 0h2v4h10v-4h2v6H5v-6z"/>
-            </svg>
-          </button>
-          <button
-            id="export-btn"
-            class="secondary hidden"
-            type="button"
-            title="Exportar circuito (JSON)"
-            aria-label="Exportar circuito"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 12h2v4h10v-4h2v6H5v-6z"
-              />
-            </svg>
-          </button>
-          <button
-            id="png-btn"
-            class="secondary hidden"
-            type="button"
-            title="Exportar PNG"
-            aria-label="Exportar PNG"
-          >
-            PNG
-          </button>
+          <div id="managerial-actions">
+            <button
+              id="bom-btn"
+              class="secondary hidden"
+              type="button"
+              title="Lista de Materiais (BOM)"
+              aria-label="Lista de Materiais"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4.5" y="2" width="15" height="20" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/>
+                <line x1="8" y1="8.5" x2="16" y2="8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <line x1="8" y1="15.5" x2="13" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button
+              id="import-btn"
+              class="secondary hidden"
+              type="button"
+              title="Importar circuito (JSON)"
+              aria-label="Importar circuito"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 15l4-4h-3V4h-2v7H8l4 4zm-7 0h2v4h10v-4h2v6H5v-6z"/>
+              </svg>
+            </button>
+            <button
+              id="export-btn"
+              class="secondary hidden"
+              type="button"
+              title="Exportar circuito (JSON)"
+              aria-label="Exportar circuito"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 12h2v4h10v-4h2v6H5v-6z"/>
+              </svg>
+            </button>
+            <button
+              id="png-btn"
+              class="secondary hidden"
+              type="button"
+              title="Exportar PNG"
+              aria-label="Exportar PNG"
+            >
+              PNG
+            </button>
+          </div>
           <button
             id="current-arrow-btn"
             class="secondary hidden"
