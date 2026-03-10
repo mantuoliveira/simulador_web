@@ -293,11 +293,11 @@ const COMPONENT_BEHAVIORS = {
   cccs: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
     buildSvg: (options = {}) => buildCccsSvg(options),
-    formatValue: (component) => `k=${(component.value || 0).toFixed(1)}`,
-    formatWheelValue: (component) => `k=${(component.value || 0).toFixed(1)} A/A`,
+    formatValue: (component) => `k=${Math.round(component.value || 0)}`,
+    formatWheelValue: (component) => `k=${Math.round(component.value || 0)} A/A`,
     valueFromNormalized: (_component, normalized) =>
-      snapToStep(-10 + 20 * clamp(normalized, 0, 1), 0.1),
-    normalizedFromValue: (component) => clamp(((component.value || 0) + 10) / 20, 0, 1),
+      snapToStep(-300 + 600 * clamp(normalized, 0, 1), 1),
+    normalizedFromValue: (component) => clamp(((component.value || 0) + 300) / 600, 0, 1),
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.45),
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
@@ -595,7 +595,7 @@ function getComponentWheelDisplay(component) {
   if (component.type === "cccs") {
     return {
       parameter: "k",
-      value: (component.value || 0).toFixed(1),
+      value: `${Math.round(component.value || 0)}`,
       unit: "A/A",
     };
   }
