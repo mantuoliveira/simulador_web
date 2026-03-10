@@ -4,12 +4,12 @@ Aplicativo web estático para montar, editar e simular circuitos DC com foco em 
 
 ## Recursos
 
-- Componentes disponíveis: fonte de tensão, fonte de corrente, fonte CCCS, resistor, amp op, diodo, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
+- Componentes disponíveis: fonte de tensão, fonte de corrente, fonte CCCS, resistor, capacitor, amp op, diodo, diodo zener, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
 - Canvas com grade por pontos, pan e zoom.
 - Roteamento ortogonal automático de fios.
 - Junções automáticas ao conectar em um fio existente.
 - Auto-conexão por arraste quando dois terminais se encontram de forma inequívoca.
-- Simulação DC com solver MNA e suporte a diodo, MOSFET N, MOSFET P, transistor NPN, transistor PNP e amp op.
+- Simulação DC com solver MNA e suporte a diodo, diodo zener, MOSFET N, MOSFET P, transistor NPN, transistor PNP e amp op.
 - Exportação de PNG sem grade, com corte automático e render em alta resolução.
 - Compartilhamento nativo no mobile quando suportado.
 - PWA com cache offline após o primeiro carregamento.
@@ -125,7 +125,7 @@ Ou substitua `localhost` pelo IP da máquina na rede local.
 Checagem rápida dos arquivos principais:
 
 ```bash
-git diff -- index.html styles.css app-bootstrap.js bootstrap/bootstrap.js core/constants.js core/support.js runtime/state.js render/render.js editor/circuit.js editor/controls.js editor/interactions.js editor/routing.js simulation/solver.js export/png.js service-worker.js README.md
+git diff -- index.html styles.css app-bootstrap.js bootstrap/bootstrap.js core/constants.js core/behaviors.js core/model.js core/support.js runtime/state.js runtime/ui.js runtime/viewport.js render/render.js editor/ui.js editor/selectors.js editor/circuit.js editor/controls.js editor/interactions.js editor/routing.js simulation/solver.js export/png.js service-worker.js README.md docs/refactor-notes.md
 ```
 
 Checagem rápida no navegador após mudanças em módulos:
