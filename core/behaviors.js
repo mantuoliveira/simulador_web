@@ -308,7 +308,7 @@ const COMPONENT_BEHAVIORS = {
     ],
     getCurrentArrowLayout: () => ({
       sideSign: -1,
-      lateralOffset: 0.98,
+      lateralOffset: 1.98,
       textOffsetExtra: 0,
     }),
   },
