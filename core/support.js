@@ -448,6 +448,23 @@ const SI_PREFIXES = new Map([
   [12, "T"],
 ]);
 
+const SI_INPUT_PREFIXES = new Map([
+  ["", 0],
+  ["p", -12],
+  ["n", -9],
+  ["u", -6],
+  ["µ", -6],
+  ["μ", -6],
+  ["m", -3],
+  ["k", 3],
+  ["K", 3],
+  ["M", 6],
+  ["g", 9],
+  ["G", 9],
+  ["t", 12],
+  ["T", 12],
+]);
+
 function engineeringExponent(value) {
   const abs = Math.abs(value);
   const rawExponent = Math.floor(Math.log10(abs) / 3) * 3;
@@ -473,6 +490,43 @@ function formatEngineeringValueFixed(value, unit, decimals = 1) {
   const exponent = engineeringExponent(value);
   const scaled = value / Math.pow(10, exponent);
   return `${scaled.toFixed(safeDecimals)} ${SI_PREFIXES.get(exponent)}${unit}`;
+}
+
+function parseEngineeringValue(text, options = {}) {
+  const { allowPercent = false, wholeNumberPercent = false } = options;
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+
+  const compact = raw.replace(/\s+/g, "").replace(/,/g, ".");
+  if (!compact) return null;
+
+  const hasPercent = compact.endsWith("%");
+  const source = hasPercent ? compact.slice(0, -1) : compact;
+  if (!source) return null;
+
+  const match = source.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:([pnumkKMGTgµμ]?))?(.*)$/);
+  if (!match) return null;
+
+  const magnitude = Number.parseFloat(match[1]);
+  const prefix = match[2] || "";
+  const suffix = match[3] || "";
+  if (!Number.isFinite(magnitude) || !SI_INPUT_PREFIXES.has(prefix)) {
+    return null;
+  }
+
+  if (suffix && !/^[A-Za-zΩ/%²]+(?:\/[A-Za-zΩ%²]+)*$/.test(suffix)) {
+    return null;
+  }
+
+  let value = magnitude * Math.pow(10, SI_INPUT_PREFIXES.get(prefix));
+  if (hasPercent) {
+    if (!allowPercent) return null;
+    value /= 100;
+  } else if (allowPercent && wholeNumberPercent && Math.abs(value) > 1 && Math.abs(value) <= 100) {
+    value /= 100;
+  }
+
+  return Number.isFinite(value) ? value : null;
 }
 
 function formatVoltage(value) {
@@ -957,6 +1011,7 @@ export {
   formatResistance,
   formatEngineeringValue,
   formatEngineeringValueFixed,
+  parseEngineeringValue,
   formatVoltage,
   formatSymmetricVoltage,
   formatCurrent,

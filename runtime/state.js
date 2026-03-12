@@ -126,6 +126,12 @@ const appEls = {
   terminalLabelForm: document.getElementById("terminal-label-form"),
   terminalLabelInput: document.getElementById("terminal-label-input"),
   terminalLabelCancel: document.getElementById("terminal-label-cancel"),
+  manualValueModal: document.getElementById("manual-value-modal"),
+  manualValueForm: document.getElementById("manual-value-form"),
+  manualValueTitle: document.getElementById("manual-value-title"),
+  manualValueLabel: document.getElementById("manual-value-label"),
+  manualValueInput: document.getElementById("manual-value-input"),
+  manualValueCancel: document.getElementById("manual-value-cancel"),
 };
 
 function createRenderTarget(
@@ -204,6 +210,10 @@ const terminalLabelEditorState = {
   terminalRef: null,
 };
 
+const manualValueEditorState = {
+  componentId: null,
+};
+
 const themeState = {
   mode: document.documentElement.dataset.theme === DARK_THEME ? DARK_THEME : LIGHT_THEME,
 };
@@ -244,6 +254,7 @@ export {
   deleteButtonHoldState,
   exportButtonHoldState,
   terminalLabelEditorState,
+  manualValueEditorState,
   themeState,
   themePalette,
   spriteMap,

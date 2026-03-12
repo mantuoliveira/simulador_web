@@ -42,6 +42,7 @@ import {
   formatCurrent,
   formatEngineeringValue,
   formatEngineeringValueFixed,
+  parseEngineeringValue,
   safeCapacitance,
   formatTransconductance,
   formatResistance,
@@ -70,6 +71,14 @@ const DEFAULT_COMPONENT_BEHAVIOR = {
   normalizedFromValue: () => 0,
   setEditableValue(component, value) {
     component.value = value;
+  },
+  parseManualValue: (_component, rawText) => {
+    const value = parseEngineeringValue(rawText);
+    if (!Number.isFinite(value)) {
+      return { ok: false, message: "Valor invalido" };
+    }
+
+    return { ok: true, value };
   },
   resetEditableParameter: () => {},
   toggleEditableParameter: () => false,
@@ -132,6 +141,22 @@ function createMosfetBehavior(svgBuilder, wheelTitle) {
 
       component.k = value;
     },
+    parseManualValue: (component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (component.activeEditableParam === "vt") {
+        return { ok: true, value };
+      }
+
+      if (value <= 0) {
+        return { ok: false, message: "k deve ser maior que zero" };
+      }
+
+      return { ok: true, value };
+    },
     resetEditableParameter(component) {
       component.activeEditableParam = "k";
     },
@@ -189,6 +214,18 @@ function createBjtBehavior(svgBuilder) {
     normalizedFromValue: (component) => {
       const safe = clamp(component.value, BJT_MIN_BETA, BJT_MAX_BETA);
       return clamp((safe - BJT_MIN_BETA) / (BJT_MAX_BETA - BJT_MIN_BETA), 0, 1);
+    },
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (value <= 0) {
+        return { ok: false, message: "β deve ser maior que zero" };
+      }
+
+      return { ok: true, value };
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.1),
     isSimulatedBranch: true,
@@ -269,6 +306,10 @@ const COMPONENT_BEHAVIORS = {
     valueFromNormalized: (_component, normalized) =>
       roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      return Number.isFinite(value) ? { ok: true, value } : { ok: false, message: "Valor invalido" };
+    },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
@@ -294,6 +335,10 @@ const COMPONENT_BEHAVIORS = {
     valueFromNormalized: (_component, normalized) =>
       roundTo(-24 + 48 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp((component.value + 24) / 48, 0, 1),
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      return Number.isFinite(value) ? { ok: true, value } : { ok: false, message: "Valor invalido" };
+    },
     getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 1.22),
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [],
@@ -306,6 +351,10 @@ const COMPONENT_BEHAVIORS = {
     valueFromNormalized: (_component, normalized) =>
       snapToStep(-0.1 + 0.2 * clamp(normalized, 0, 1), 0.001),
     normalizedFromValue: (component) => clamp((component.value + 0.1) / 0.2, 0, 1),
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      return Number.isFinite(value) ? { ok: true, value } : { ok: false, message: "Valor invalido" };
+    },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.05),
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
@@ -325,6 +374,10 @@ const COMPONENT_BEHAVIORS = {
     valueFromNormalized: (_component, normalized) =>
       snapToStep(-300 + 600 * clamp(normalized, 0, 1), 1),
     normalizedFromValue: (component) => clamp(((component.value || 0) + 300) / 600, 0, 1),
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      return Number.isFinite(value) ? { ok: true, value } : { ok: false, message: "Valor invalido" };
+    },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 2.45),
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
@@ -348,6 +401,18 @@ const COMPONENT_BEHAVIORS = {
       quantizeCapacitor(Math.pow(10, -12 + 10 * clamp(normalized, 0, 1))),
     normalizedFromValue: (component) =>
       clamp((Math.log10(safeCapacitance(component.value)) + 12) / 10, 0, 1),
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (value <= 0) {
+        return { ok: false, message: "Capacitancia deve ser maior que zero" };
+      }
+
+      return { ok: true, value };
+    },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
@@ -378,6 +443,18 @@ const COMPONENT_BEHAVIORS = {
     normalizedFromValue: (component) => {
       const safe = clamp(component.value, 1, 1_000_000);
       return clamp(Math.log10(safe) / 6, 0, 1);
+    },
+    parseManualValue: (_component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (value <= 0) {
+        return { ok: false, message: "Resistencia deve ser maior que zero" };
+      }
+
+      return { ok: true, value };
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
@@ -433,6 +510,34 @@ const COMPONENT_BEHAVIORS = {
       }
 
       component.value = value;
+    },
+    parseManualValue: (component, rawText) => {
+      if (component.activeEditableParam === "position") {
+        const value = parseEngineeringValue(rawText, {
+          allowPercent: true,
+          wholeNumberPercent: true,
+        });
+        if (!Number.isFinite(value)) {
+          return { ok: false, message: "Posicao invalida" };
+        }
+
+        if (value < 0 || value > 1) {
+          return { ok: false, message: "Posicao deve ficar entre 0% e 100%" };
+        }
+
+        return { ok: true, value };
+      }
+
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (value <= 0) {
+        return { ok: false, message: "Resistencia deve ser maior que zero" };
+      }
+
+      return { ok: true, value };
     },
     resetEditableParameter(component) {
       component.activeEditableParam = "resistance";
@@ -496,6 +601,21 @@ const COMPONENT_BEHAVIORS = {
       }
 
       component.value = value;
+    },
+    parseManualValue: (component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (component.activeEditableParam === "av") {
+        if (value <= 0) {
+          return { ok: false, message: "Av deve ser maior que zero" };
+        }
+        return { ok: true, value };
+      }
+
+      return { ok: true, value: Math.abs(value) };
     },
     resetEditableParameter(component) {
       component.activeEditableParam = "supply";
@@ -604,6 +724,23 @@ const COMPONENT_BEHAVIORS = {
       }
 
       component.vz = value;
+    },
+    parseManualValue: (component, rawText) => {
+      const value = parseEngineeringValue(rawText);
+      if (!Number.isFinite(value)) {
+        return { ok: false, message: "Valor invalido" };
+      }
+
+      if (value <= 0) {
+        return {
+          ok: false,
+          message: component.activeEditableParam === "rz"
+            ? "Rz deve ser maior que zero"
+            : "Vz deve ser maior que zero",
+        };
+      }
+
+      return { ok: true, value };
     },
     resetEditableParameter(component) {
       component.activeEditableParam = "vz";
@@ -858,6 +995,17 @@ function applyNormalizedValueToComponent(component, normalized) {
   behavior.setEditableValue(component, value);
 }
 
+function applyManualValueInputToComponent(component, rawText) {
+  const behavior = getComponentBehavior(component?.type);
+  const result = behavior.parseManualValue(component, rawText);
+  if (!result?.ok) {
+    return result || { ok: false, message: "Valor invalido" };
+  }
+
+  behavior.setEditableValue(component, result.value);
+  return { ok: true, value: result.value };
+}
+
 function resetEditableParameter(component) {
   if (!component) return;
   getComponentBehavior(component.type).resetEditableParameter(component);
@@ -916,6 +1064,7 @@ export {
   getCurrentArrowTerminalPair,
   getComponentWheelTitle,
   applyNormalizedValueToComponent,
+  applyManualValueInputToComponent,
   resetEditableParameter,
   toggleEditableParameter,
 };

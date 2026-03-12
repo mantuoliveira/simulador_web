@@ -279,7 +279,8 @@ body {
   opacity: 1;
 }
 
-#terminal-label-modal {
+#terminal-label-modal,
+#manual-value-modal {
   position: absolute;
   inset: 0;
   display: grid;
@@ -300,10 +301,16 @@ body {
   box-shadow: var(--shadow-panel);
 }
 
-.terminal-label-card label {
+.terminal-label-card label,
+#manual-value-title {
   font-size: 0.86rem;
   font-weight: 700;
   color: var(--ink-soft);
+}
+
+#manual-value-title {
+  font-size: 1rem;
+  color: var(--ink);
 }
 
 .terminal-label-card input {

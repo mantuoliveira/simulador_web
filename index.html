@@ -50,6 +50,24 @@
             </div>
           </form>
         </div>
+        <div id="manual-value-modal" class="hidden" aria-hidden="true">
+          <form id="manual-value-form" class="terminal-label-card">
+            <div id="manual-value-title">Valor manual</div>
+            <label id="manual-value-label" for="manual-value-input">Digite o novo valor</label>
+            <input
+              id="manual-value-input"
+              name="manual-value"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Ex.: 10 k, 100 u, 4.7 M"
+            />
+            <div class="terminal-label-actions">
+              <button id="manual-value-cancel" class="secondary" type="button">Cancelar</button>
+              <button id="manual-value-save" class="primary" type="submit">OK</button>
+            </div>
+          </form>
+        </div>
       </main>
 
       <div id="value-wheel" class="hidden" aria-label="Roda de valores">

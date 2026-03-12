@@ -8,11 +8,18 @@ import {
 } from "../core/constants.js";
 import { getComponentCollisionExtents } from "../core/model.js";
 import {
+  applyManualValueInputToComponent,
+  getComponentWheelDisplay,
+  getComponentWheelTitle,
+  rememberComponentParams,
+} from "../core/behaviors.js";
+import {
   appEls,
   clearSelectionState,
   clearSimulationState,
   deleteButtonHoldState,
   exportButtonHoldState,
+  manualValueEditorState,
   state,
   themeState,
 } from "../runtime/state.js";
@@ -63,6 +70,7 @@ function setupButtons() {
   setSimulationButtonState(false);
   updateThemeToggleButtonState();
   setupTerminalLabelModal();
+  setupManualValueModal();
 
   appEls.themeToggleBtn.addEventListener("click", () => {
     applyThemeMode(themeState.mode === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
@@ -139,6 +147,10 @@ function setupButtons() {
 
   appEls.swapOpAmpBtn.addEventListener("click", toggleSelectedComponentTerminalOrder);
   appEls.currentArrowBtn.addEventListener("click", toggleSelectedAnnotationVisibility);
+  appEls.valueWheel.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    openManualValueModal();
+  });
   appEls.rotateBtn.addEventListener("click", () => {
     if (state.selectedComponentId == null) return;
     const result = rotateComponentInCircuit(state, state.selectedComponentId);
@@ -174,6 +186,73 @@ function setupTerminalLabelModal() {
   });
 }
 
+function setupManualValueModal() {
+  appEls.manualValueForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveManualValueFromEditor();
+  });
+
+  appEls.manualValueCancel.addEventListener("click", () => {
+    closeManualValueModal();
+  });
+
+  appEls.manualValueModal.addEventListener("pointerdown", (event) => {
+    if (event.target === appEls.manualValueModal) {
+      closeManualValueModal();
+    }
+  });
+}
+
+function openManualValueModal() {
+  const component = getComponentById(state.selectedComponentId);
+  if (!component || COMPONENT_DEFS[component.type]?.editable !== true) {
+    return;
+  }
+
+  manualValueEditorState.componentId = component.id;
+  const wheelDisplay = getComponentWheelDisplay(component);
+  const currentValue = [wheelDisplay.value.replace(/^±/, ""), wheelDisplay.unit].filter(Boolean).join(" ");
+  appEls.manualValueTitle.textContent = getComponentWheelTitle(component) || "Valor manual";
+  appEls.manualValueLabel.textContent = wheelDisplay.parameter
+    ? `${wheelDisplay.parameter} atual: ${currentValue}`
+    : `Valor atual: ${currentValue}`;
+  appEls.manualValueInput.value = "";
+  appEls.manualValueModal.classList.remove("hidden");
+  appEls.manualValueModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    appEls.manualValueInput.focus();
+    appEls.manualValueInput.select();
+  }, 0);
+}
+
+function closeManualValueModal() {
+  manualValueEditorState.componentId = null;
+  appEls.manualValueModal.classList.add("hidden");
+  appEls.manualValueModal.setAttribute("aria-hidden", "true");
+}
+
+function saveManualValueFromEditor() {
+  const component = getComponentById(manualValueEditorState.componentId);
+  if (!component) {
+    closeManualValueModal();
+    return;
+  }
+
+  const result = applyManualValueInputToComponent(component, appEls.manualValueInput.value);
+  if (!result.ok) {
+    showStatus(result.message || "Valor invalido", true);
+    appEls.manualValueInput.focus();
+    appEls.manualValueInput.select();
+    return;
+  }
+
+  rememberComponentParams(component, state);
+  closeManualValueModal();
+  updateSelectionUi();
+  onCircuitChanged();
+  showStatus("Valor atualizado");
+}
+
 function clearCircuit() {
   state.components = [];
   state.wires = [];
@@ -186,6 +265,7 @@ function clearCircuit() {
 
   setSimulationButtonState(false);
   closeTerminalLabelEditor();
+  closeManualValueModal();
   updateSelectionUi();
   requestRender(true);
   showStatus("Canvas limpo");
