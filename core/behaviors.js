@@ -442,9 +442,13 @@ const COMPONENT_BEHAVIORS = {
         component.activeEditableParam === "position" ? "resistance" : "position";
       return true;
     },
-    getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 2.05),
+    getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [[0, 1], [1, 2]],
+    allowsIntraComponentConnection: (_component, firstTerminalIndex, secondTerminalIndex) => {
+      const terminalPair = new Set([firstTerminalIndex, secondTerminalIndex]);
+      return terminalPair.has(1) && (terminalPair.has(0) || terminalPair.has(2));
+    },
     spriteOverlay: "potentiometer_wiper",
   },
   op_amp: {

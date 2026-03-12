@@ -526,10 +526,12 @@ function drawPotentiometerWiper(renderTarget, component) {
   const { context } = renderTarget;
   const palette = getRenderThemePalette(renderTarget);
   const position = clamp(component.wiperPosition ?? 0.5, 0, 1);
+  const spriteToLocal = (spriteValue) => (spriteValue - 80) / 40;
+  const contactSpriteX = 36 + (132 - 36) * position;
   const startX = worldLengthToScreen(0);
-  const startY = worldLengthToScreen(-2);
-  const tipX = worldLengthToScreen(-1.4 + 2.8 * position);
-  const tipY = worldLengthToScreen(0.2);
+  const startY = worldLengthToScreen(-1.82);
+  const tipX = worldLengthToScreen(spriteToLocal(contactSpriteX));
+  const tipY = worldLengthToScreen(spriteToLocal(58));
   const shaftVectorX = tipX - startX;
   const shaftVectorY = tipY - startY;
   const shaftLength = Math.hypot(shaftVectorX, shaftVectorY) || 1;
@@ -537,7 +539,7 @@ function drawPotentiometerWiper(renderTarget, component) {
   const unitY = shaftVectorY / shaftLength;
   const normalX = -unitY;
   const normalY = unitX;
-  const arrowSize = Math.max(8, worldLengthToScreen(0.28));
+  const arrowSize = Math.max(7, worldLengthToScreen(0.22));
 
   context.strokeStyle = palette.canvasSpriteStroke;
   context.lineWidth = Math.max(2.2, worldLengthToScreen(0.16));
