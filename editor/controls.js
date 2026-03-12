@@ -504,11 +504,7 @@ function setupKeyboardShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Delete") return;
     if (isEditableTarget(event.target)) return;
-    if (
-      state.selectedComponentId == null &&
-      state.selectedWireId == null &&
-      state.selectedTerminalLabelKey == null
-    ) {
+    if (!canDeleteCurrentSelection()) {
       return;
     }
 
@@ -517,7 +513,30 @@ function setupKeyboardShortcuts() {
   });
 }
 
+function canDeleteCurrentSelection() {
+  if (
+    state.pendingTerminal &&
+    getComponentById(state.pendingTerminal.componentId)?.type === "junction"
+  ) {
+    return true;
+  }
+
+  return (
+    state.selectedComponentId != null ||
+    state.selectedWireId != null ||
+    state.selectedTerminalLabelKey != null
+  );
+}
+
 function handleDeleteAction() {
+  if (
+    state.pendingTerminal &&
+    getComponentById(state.pendingTerminal.componentId)?.type === "junction"
+  ) {
+    removeComponent(state.pendingTerminal.componentId);
+    return;
+  }
+
   if (state.selectedComponentId != null) {
     removeComponent(state.selectedComponentId);
     return;

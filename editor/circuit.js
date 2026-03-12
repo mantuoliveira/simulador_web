@@ -63,6 +63,7 @@ import { buildStoredSimulationResult, runSimulation } from "../simulation/solver
 
 function handleTerminalTap(componentId, terminalIndex) {
   if (!state.pendingTerminal) {
+    clearSelectionState();
     syncSelectedNodeMarkerWithTerminal(componentId, terminalIndex);
   } else {
     state.selectedWireId = null;
@@ -216,6 +217,64 @@ function handleWireTap(wireHit) {
   state.pendingTerminal = null;
   updateSelectionUi();
   onCircuitChanged();
+}
+
+function connectPendingTerminalToPoint(point) {
+  if (!state.pendingTerminal || !point) {
+    return false;
+  }
+
+  const pending = state.pendingTerminal;
+  const targetPoint = {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+  };
+  const start = getTerminalPosition(pending.componentId, pending.terminalIndex);
+  if (!start) {
+    state.pendingTerminal = null;
+    updateSelectionUi();
+    return true;
+  }
+
+  if (sameGridPoint(start, targetPoint)) {
+    showStatus("Escolha outro ponto para criar a juncao", true);
+    state.pendingTerminal = null;
+    updateSelectionUi();
+    return true;
+  }
+
+  const junction = buildJunctionComponent(targetPoint);
+  if (!isJunctionPlacementValidForWireTap(junction)) {
+    showStatus("Nao foi possivel criar a juncao", true);
+    state.pendingTerminal = null;
+    updateSelectionUi();
+    return true;
+  }
+
+  const route = routeWire(
+    start,
+    targetPoint,
+    buildRouteTerminalOptions(pending, { componentId: junction.id, terminalIndex: 0 })
+  );
+  if (!route) {
+    showStatus("Nao foi possivel rotear o fio", true);
+    state.pendingTerminal = null;
+    updateSelectionUi();
+    return true;
+  }
+
+  state.components.push(junction);
+  state.wires.push({
+    id: state.nextWireId++,
+    from: cloneTerminalRef(pending),
+    to: { componentId: junction.id, terminalIndex: 0 },
+    path: route,
+  });
+  state.nextComponentId += 1;
+  state.pendingTerminal = null;
+  updateSelectionUi();
+  onCircuitChanged();
+  return true;
 }
 
 function hasDirectWireBetween(aComponentId, aTerminalIndex, bComponentId, bTerminalIndex) {
@@ -2126,6 +2185,10 @@ function deriveSelectionUiState() {
   }
 
   if (terminalPending) {
+    const pendingComponent = getComponentById(state.pendingTerminal?.componentId);
+    if (pendingComponent?.type === "junction") {
+      uiState.showDelete = true;
+    }
     if (nodeMarker && canToggleNodeMarkerVoltage(nodeMarker)) {
       uiState.showCurrentArrow = true;
       uiState.visibilityToggleState = {
@@ -2501,6 +2564,7 @@ function saveTerminalLabelFromEditor() {
     appEls.terminalLabelInput.value
   );
   closeTerminalLabelEditor();
+  clearSelectionState();
   updateSelectionUi();
   onCircuitChanged();
 
@@ -2681,6 +2745,7 @@ export {
   handleTerminalTap,
   isIntraComponentConnectionAllowed,
   handleWireTap,
+  connectPendingTerminalToPoint,
   hasDirectWireBetween,
   addComponent,
   addComponentToCircuit,

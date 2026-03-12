@@ -55,6 +55,7 @@ import {
 // Canvas rendering, theme-driven sprite handling, and service worker/render loop setup.
 
 const thermalTintedSpriteCache = new WeakMap();
+const CARDINAL_DIRECTIONS = ["up", "right", "down", "left"];
 
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -527,7 +528,7 @@ function drawPotentiometerWiper(renderTarget, component) {
   const palette = getRenderThemePalette(renderTarget);
   const position = clamp(component.wiperPosition ?? 0.5, 0, 1);
   const spriteToLocal = (spriteValue) => (spriteValue - 80) / 40;
-  const contactSpriteX = 36 + (132 - 36) * position;
+  const contactSpriteX = 32 + (128 - 32) * position;
   const startX = worldLengthToScreen(0);
   const startY = worldLengthToScreen(-1.82);
   const tipX = worldLengthToScreen(spriteToLocal(contactSpriteX));
@@ -708,6 +709,73 @@ function getDirectionalLabelPlacement(screenPoint, boxW, boxH, labelDirection = 
   };
 }
 
+function getTerminalLabelDirectionCandidates(preferredDirection = "up") {
+  const preferred = CARDINAL_DIRECTIONS.includes(preferredDirection) ? preferredDirection : "up";
+  const preferredIndex = CARDINAL_DIRECTIONS.indexOf(preferred);
+  const clockwise = CARDINAL_DIRECTIONS[(preferredIndex + 1) % CARDINAL_DIRECTIONS.length];
+  const counterClockwise =
+    CARDINAL_DIRECTIONS[(preferredIndex + CARDINAL_DIRECTIONS.length - 1) % CARDINAL_DIRECTIONS.length];
+  const opposite = CARDINAL_DIRECTIONS[(preferredIndex + 2) % CARDINAL_DIRECTIONS.length];
+  return [preferred, clockwise, counterClockwise, opposite];
+}
+
+function getLabelBoxWirePenalty(renderTarget, boxX, boxY, boxW, boxH) {
+  const padding = 6;
+  const rect = {
+    left: boxX - padding,
+    right: boxX + boxW + padding,
+    top: boxY - padding,
+    bottom: boxY + boxH + padding,
+  };
+
+  let penalty = 0;
+  for (const wire of state.wires) {
+    if (!isWireVisible(wire)) continue;
+
+    for (let index = 0; index < wire.path.length - 1; index += 1) {
+      const start = worldToScreen(wire.path[index].x, wire.path[index].y);
+      const end = worldToScreen(wire.path[index + 1].x, wire.path[index + 1].y);
+      if (segmentIntersectsRect(start, end, rect)) {
+        penalty += 1;
+      }
+    }
+  }
+
+  return penalty;
+}
+
+function segmentIntersectsRect(start, end, rect) {
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+
+  if (Math.abs(start.x - end.x) < 0.001) {
+    return (
+      start.x >= rect.left &&
+      start.x <= rect.right &&
+      maxY >= rect.top &&
+      minY <= rect.bottom
+    );
+  }
+
+  if (Math.abs(start.y - end.y) < 0.001) {
+    return (
+      start.y >= rect.top &&
+      start.y <= rect.bottom &&
+      maxX >= rect.left &&
+      minX <= rect.right
+    );
+  }
+
+  return (
+    maxX >= rect.left &&
+    minX <= rect.right &&
+    maxY >= rect.top &&
+    minY <= rect.bottom
+  );
+}
+
 function getComponentScreenRect(component) {
   const bounds = getComponentRenderBounds(component);
   if (!bounds) return null;
@@ -728,12 +796,41 @@ function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalInde
 
   const { context } = renderTarget;
   const screenPoint = worldToScreen(terminalPosition.x, terminalPosition.y);
-  const labelDirection = getTerminalLabelDirection(componentId, terminalIndex);
+  const preferredDirection = getTerminalLabelDirection(componentId, terminalIndex);
   const textLayout = getTerminalLabelTextLayout(context, label);
   const padX = 8;
   const boxW = textLayout.totalWidth + padX * 2;
   const boxH = textLayout.boxHeight;
-  const placement = getDirectionalLabelPlacement(screenPoint, boxW, boxH, labelDirection);
+  const directionCandidates = getTerminalLabelDirectionCandidates(preferredDirection);
+
+  let bestPlacement = null;
+  let bestDirection = directionCandidates[0];
+  let bestPenalty = Infinity;
+
+  for (let index = 0; index < directionCandidates.length; index += 1) {
+    const direction = directionCandidates[index];
+    const candidate = getDirectionalLabelPlacement(screenPoint, boxW, boxH, direction);
+    const penalty = getLabelBoxWirePenalty(
+      renderTarget,
+      candidate.boxX,
+      candidate.boxY,
+      boxW,
+      boxH
+    );
+
+    if (penalty < bestPenalty) {
+      bestPenalty = penalty;
+      bestPlacement = candidate;
+      bestDirection = direction;
+    }
+
+    if (penalty === 0) {
+      break;
+    }
+  }
+
+  const placement =
+    bestPlacement || getDirectionalLabelPlacement(screenPoint, boxW, boxH, bestDirection);
 
   return {
     label,
@@ -741,6 +838,7 @@ function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalInde
     textLayout,
     boxW,
     boxH,
+    labelDirection: bestDirection,
     boxX: placement.boxX,
     boxY: placement.boxY,
     textX: placement.textX,

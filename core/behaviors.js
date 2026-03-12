@@ -442,7 +442,11 @@ const COMPONENT_BEHAVIORS = {
         component.activeEditableParam === "position" ? "resistance" : "position";
       return true;
     },
-    getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 1.62),
+    getValueLabelAnchor: (component) => {
+      const rotation = normalizeRotation(component.rotation);
+      const offset = rotation === 90 || rotation === 270 ? 2.15 : 1.62;
+      return getReverseCardinalValueLabelAnchor(component, offset);
+    },
     isSimulatedBranch: true,
     getReachabilityTerminalPairs: () => [[0, 1], [1, 2]],
     allowsIntraComponentConnection: (_component, firstTerminalIndex, secondTerminalIndex) => {

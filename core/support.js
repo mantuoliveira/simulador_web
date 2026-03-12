@@ -621,7 +621,7 @@ function buildPotentiometerSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   const showWiper = options.showPotentiometerWiper !== false;
   const wiperPosition = safePotentiometerWiperPosition(options.wiperPosition);
-  const contactX = 36 + (132 - 36) * wiperPosition;
+  const contactX = 32 + (128 - 32) * wiperPosition;
   const wiperMarkup = showWiper
     ? `
       <line x1="80" y1="8" x2="${contactX}" y2="58"/>
@@ -630,7 +630,7 @@ function buildPotentiometerSvg(options = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
     <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
       <line x1="0" y1="80" x2="24" y2="80"/>
-      <polyline points="24,80 36,58 48,102 60,58 72,102 84,58 96,102 108,58 120,102 132,58 136,80"/>
+      <polyline points="24,80 32,58 44,102 56,58 68,102 80,58 92,102 104,58 116,102 128,58 136,80"/>
       <line x1="136" y1="80" x2="160" y2="80"/>
       ${wiperMarkup}
     </g>

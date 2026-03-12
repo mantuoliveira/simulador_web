@@ -17,6 +17,7 @@ import {
   clientToCanvas,
   clientToWorld,
   cycleNodeMarkerAnchor,
+  connectPendingTerminalToPoint,
   getComponentById,
   handleTerminalTap,
   handleWireTap,
@@ -257,6 +258,12 @@ function setupCanvasGestures() {
       }
 
       selectWire(wireHit.wire.id);
+      return;
+    }
+
+    if (state.pendingTerminal) {
+      clearEmptyCanvasTapHistory();
+      connectPendingTerminalToPoint(point);
       return;
     }
 
@@ -552,6 +559,13 @@ function startSingleTouch(touch, timestamp = Date.now()) {
     }
 
     selectWire(wireHit.wire.id);
+    state.pointer.mode = "none";
+    return;
+  }
+
+  if (state.pendingTerminal) {
+    clearEmptyCanvasTapHistory();
+    connectPendingTerminalToPoint(point);
     state.pointer.mode = "none";
     return;
   }
