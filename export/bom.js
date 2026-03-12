@@ -5,10 +5,18 @@ import { showStatus } from "../editor/ui.js";
 
 // Bill of Materials generation and PDF export.
 
+function formatPotentiometerPosition(value) {
+  const percent = Math.max(0, Math.min(100, Math.round((value ?? 0.5) * 100)));
+  return `${percent}%`;
+}
+
 function formatComponentValue(component) {
   const { type, value } = component;
 
   if (type === "resistor") return formatResistance(value);
+  if (type === "potentiometer") {
+    return `${formatResistance(value)}, cursor ${formatPotentiometerPosition(component.wiperPosition)}`;
+  }
   if (type === "capacitor") return formatEngineeringValue(value, "F");
   if (type === "voltage_source") return formatEngineeringValue(value, "V");
   if (type === "voltage_node") return formatEngineeringValue(value, "V");

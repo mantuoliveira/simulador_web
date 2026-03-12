@@ -34,6 +34,22 @@ function safeResistance(value) {
   return Math.max(1e-9, value);
 }
 
+function safePotentiometerWiperPosition(value) {
+  if (!Number.isFinite(value)) return 0.5;
+  return clamp(value, 0, 1);
+}
+
+function getPotentiometerSectionResistances(component) {
+  const totalResistance = safeResistance(component?.value);
+  const wiperPosition = safePotentiometerWiperPosition(component?.wiperPosition);
+  return {
+    totalResistance,
+    wiperPosition,
+    leftResistance: totalResistance * wiperPosition,
+    rightResistance: totalResistance * (1 - wiperPosition),
+  };
+}
+
 function safeCapacitance(value) {
   if (!Number.isFinite(value)) return 1e-6;
   return Math.max(1e-12, value);
@@ -601,6 +617,26 @@ function buildResistorSvg(options = {}) {
   </svg>`;
 }
 
+function buildPotentiometerSvg(options = {}) {
+  const { stroke } = getSpriteThemeColors(options.palette);
+  const showWiper = options.showPotentiometerWiper !== false;
+  const wiperPosition = safePotentiometerWiperPosition(options.wiperPosition);
+  const contactX = 24 + (136 - 24) * wiperPosition;
+  const wiperMarkup = showWiper
+    ? `
+      <line x1="80" y1="0" x2="${contactX}" y2="88"/>
+      <polyline points="${contactX - 16},84 ${contactX},88 ${contactX - 8},102"/>`
+    : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+    <g stroke="${stroke}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <line x1="0" y1="104" x2="24" y2="104"/>
+      <polyline points="24,104 36,82 48,126 60,82 72,126 84,82 96,126 108,82 120,126 132,82 136,104"/>
+      <line x1="136" y1="104" x2="160" y2="104"/>
+      ${wiperMarkup}
+    </g>
+  </svg>`;
+}
+
 function buildVoltageSourceSvg(options = {}) {
   const { stroke } = getSpriteThemeColors(options.palette);
   const showPolarityMarkers = options.showPolarityMarkers !== false;
@@ -891,6 +927,8 @@ export {
   roundTo,
   snapToStep,
   safeResistance,
+  safePotentiometerWiperPosition,
+  getPotentiometerSectionResistances,
   safeOpAmpSupply,
   safeBjtBeta,
   safeMosfetTransconductance,
@@ -933,6 +971,7 @@ export {
   safeCapacitance,
   buildCapacitorSvg,
   buildResistorSvg,
+  buildPotentiometerSvg,
   buildVoltageSourceSvg,
   buildCurrentSourceSvg,
   buildCccsSvg,

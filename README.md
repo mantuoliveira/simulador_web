@@ -4,7 +4,7 @@ Aplicativo web estático para montar, editar e simular circuitos DC com foco em 
 
 ## Recursos
 
-- Componentes disponíveis: fonte de tensão, fonte de corrente, fonte CCCS, resistor, capacitor, amp op, diodo, diodo zener, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
+- Componentes disponíveis: fonte de tensão, fonte de corrente, fonte CCCS, resistor, potenciômetro, capacitor, amp op, diodo, diodo zener, MOSFET N, MOSFET P, transistor NPN, transistor PNP e terra.
 - Canvas com grade por pontos, pan e zoom.
 - Roteamento ortogonal automático de fios.
 - Junções automáticas ao conectar em um fio existente.
@@ -68,6 +68,7 @@ Ou substitua `localhost` pelo IP da máquina na rede local.
 - Componentes editáveis exibem a roda de valor no canto inferior direito.
 - O valor exibido no centro da roda acompanha o componente selecionado.
 - Nos MOSFETs N e P, a roda alterna entre `k` e `Vt` ao clicar ou tocar novamente no mesmo componente sem arrastar.
+- No potenciômetro, a roda alterna entre `R` total e a posição do cursor ao clicar ou tocar novamente no mesmo componente sem arrastar.
 
 ## Exportação de imagem
 

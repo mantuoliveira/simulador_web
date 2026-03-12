@@ -26,6 +26,7 @@ import {
   buildDefaultComponentSvg,
   buildDiodeSvg,
   buildGroundSvg,
+  buildPotentiometerSvg,
   buildMosfetNSvg,
   buildMosfetPSvg,
   buildAndGateSvg,
@@ -253,6 +254,12 @@ function quantizeCapacitor(value) {
   return clamp(best * Math.pow(10, exponent), 1e-12, 0.01);
 }
 
+function formatPotentiometerPosition(value, decimals = 0) {
+  const clamped = clamp(value ?? 0.5, 0, 1);
+  const percent = roundTo(clamped * 100, decimals);
+  return `${Number.isInteger(percent) ? percent.toFixed(0) : percent}%`;
+}
+
 const COMPONENT_BEHAVIORS = {
   voltage_source: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
@@ -388,6 +395,57 @@ const COMPONENT_BEHAVIORS = {
       textOffsetExtra:
         Math.abs(geometry.dirY) > Math.abs(geometry.dirX) ? Math.max(10, geometry.zoom * 12) : 0,
     }),
+  },
+  potentiometer: {
+    ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      wiperPosition: 0.5,
+      activeEditableParam: "resistance",
+    }),
+    buildSvg: (options = {}) => buildPotentiometerSvg(options),
+    formatValue: (component) =>
+      `${formatResistance(component.value)} · ${formatPotentiometerPosition(component.wiperPosition)}`,
+    formatWheelValue: (component) =>
+      component.activeEditableParam === "position"
+        ? `Pos=${formatPotentiometerPosition(component.wiperPosition, 1)}`
+        : `R=${formatEngineeringValueFixed(component.value, "Ω", 1)}`,
+    getWheelTitle: () => "Potenciômetro",
+    valueFromNormalized: (component, normalized) => {
+      const clamped = clamp(normalized, 0, 1);
+      if (component.activeEditableParam === "position") {
+        return snapToStep(clamped, 0.01);
+      }
+
+      return quantizeResistor(Math.pow(10, 6 * clamped));
+    },
+    normalizedFromValue: (component) => {
+      if (component.activeEditableParam === "position") {
+        return clamp(component.wiperPosition ?? 0.5, 0, 1);
+      }
+
+      const safe = clamp(component.value, 1, 1_000_000);
+      return clamp(Math.log10(safe) / 6, 0, 1);
+    },
+    setEditableValue(component, value) {
+      if (component.activeEditableParam === "position") {
+        component.wiperPosition = value;
+        return;
+      }
+
+      component.value = value;
+    },
+    resetEditableParameter(component) {
+      component.activeEditableParam = "resistance";
+    },
+    toggleEditableParameter(component) {
+      component.activeEditableParam =
+        component.activeEditableParam === "position" ? "resistance" : "position";
+      return true;
+    },
+    getValueLabelAnchor: (component) => getReverseCardinalValueLabelAnchor(component, 2.05),
+    isSimulatedBranch: true,
+    getReachabilityTerminalPairs: () => [[0, 1], [1, 2]],
+    spriteOverlay: "potentiometer_wiper",
   },
   op_amp: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
@@ -647,6 +705,22 @@ function getComponentWheelDisplay(component) {
   }
 
   if (component.type === "resistor") {
+    const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "Ω", 1));
+    return {
+      parameter: "R",
+      ...valueAndUnit,
+    };
+  }
+
+  if (component.type === "potentiometer") {
+    if (component.activeEditableParam === "position") {
+      return {
+        parameter: "Pos",
+        value: formatPotentiometerPosition(component.wiperPosition, 1),
+        unit: "",
+      };
+    }
+
     const valueAndUnit = splitWheelValueAndUnit(formatEngineeringValueFixed(component.value, "Ω", 1));
     return {
       parameter: "R",

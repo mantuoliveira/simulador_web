@@ -254,6 +254,8 @@ function drawComponents(renderTarget, showSelection = true) {
       drawOpAmpInputMarkers(renderTarget, component);
     } else if (behavior.spriteOverlay === "voltage_source_polarity") {
       drawVoltageSourcePolarityMarkers(renderTarget, component);
+    } else if (behavior.spriteOverlay === "potentiometer_wiper") {
+      drawPotentiometerWiper(renderTarget, component);
     }
 
     const isSelected =
@@ -518,6 +520,44 @@ function drawVoltageSourcePolarityMarkers(renderTarget, component) {
   context.lineTo(plusCenterX, plusCenterY + halfSpan);
   context.stroke();
   context.restore();
+}
+
+function drawPotentiometerWiper(renderTarget, component) {
+  const { context } = renderTarget;
+  const palette = getRenderThemePalette(renderTarget);
+  const position = clamp(component.wiperPosition ?? 0.5, 0, 1);
+  const startX = worldLengthToScreen(0);
+  const startY = worldLengthToScreen(-2);
+  const tipX = worldLengthToScreen(-1.4 + 2.8 * position);
+  const tipY = worldLengthToScreen(0.2);
+  const shaftVectorX = tipX - startX;
+  const shaftVectorY = tipY - startY;
+  const shaftLength = Math.hypot(shaftVectorX, shaftVectorY) || 1;
+  const unitX = shaftVectorX / shaftLength;
+  const unitY = shaftVectorY / shaftLength;
+  const normalX = -unitY;
+  const normalY = unitX;
+  const arrowSize = Math.max(8, worldLengthToScreen(0.28));
+
+  context.strokeStyle = palette.canvasSpriteStroke;
+  context.lineWidth = Math.max(2.2, worldLengthToScreen(0.16));
+  context.lineCap = "round";
+  context.lineJoin = "round";
+
+  context.beginPath();
+  context.moveTo(startX, startY);
+  context.lineTo(tipX, tipY);
+  context.moveTo(tipX, tipY);
+  context.lineTo(
+    tipX - unitX * arrowSize + normalX * arrowSize * 0.6,
+    tipY - unitY * arrowSize + normalY * arrowSize * 0.6
+  );
+  context.moveTo(tipX, tipY);
+  context.lineTo(
+    tipX - unitX * arrowSize - normalX * arrowSize * 0.6,
+    tipY - unitY * arrowSize - normalY * arrowSize * 0.6
+  );
+  context.stroke();
 }
 
 function drawSimulationAnnotations(renderTarget, data) {

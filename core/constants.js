@@ -35,6 +35,9 @@ const CCCS_CONTROL_FROM_TERMINAL_INDEX = 0;
 const CCCS_CONTROL_TO_TERMINAL_INDEX = 1;
 const CCCS_OUTPUT_FROM_TERMINAL_INDEX = 2;
 const CCCS_OUTPUT_TO_TERMINAL_INDEX = 3;
+const POTENTIOMETER_LEFT_TERMINAL_INDEX = 0;
+const POTENTIOMETER_WIPER_TERMINAL_INDEX = 1;
+const POTENTIOMETER_RIGHT_TERMINAL_INDEX = 2;
 const BJT_MIN_BETA = 20;
 const BJT_MAX_BETA = 400;
 const BJT_BETA_STEP = 1;
@@ -254,6 +257,35 @@ const COMPONENT_DEFS = {
     collisionBounds: { left: 2, right: 2, up: 1, down: 1 },
     footprintExtents: { left: 2, right: 2, up: 1, down: 1 },
     footprintHalf: { x: 2.5, y: 1.5 },
+  },
+  potentiometer: {
+    label: "Potenciômetro",
+    terminals: [
+      [-2, 0],
+      [0, -2],
+      [2, 0],
+    ],
+    bodyHalfW: 1.35,
+    bodyHalfH: 1.55,
+    renderW: 4,
+    renderH: 4,
+    defaultValue: 10000,
+    editable: true,
+    unit: "Ω",
+    obstacleCells: [
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+    ],
+    collisionBounds: { left: 2, right: 2, up: 2, down: 1 },
+    footprintExtents: { left: 2, right: 2, up: 2, down: 1 },
+    footprintHalf: { x: 2.5, y: 2 },
   },
   op_amp: {
     label: "Amp Op",
@@ -705,6 +737,7 @@ const COMPONENT_DEFS = {
 
 const COMPONENT_ORDER = [
   "resistor",
+  "potentiometer",
   "capacitor",
   "voltage_source",
   "current_source",
@@ -792,6 +825,9 @@ export {
   CCCS_CONTROL_TO_TERMINAL_INDEX,
   CCCS_OUTPUT_FROM_TERMINAL_INDEX,
   CCCS_OUTPUT_TO_TERMINAL_INDEX,
+  POTENTIOMETER_LEFT_TERMINAL_INDEX,
+  POTENTIOMETER_WIPER_TERMINAL_INDEX,
+  POTENTIOMETER_RIGHT_TERMINAL_INDEX,
   BJT_MIN_BETA,
   BJT_MAX_BETA,
   BJT_BETA_STEP,

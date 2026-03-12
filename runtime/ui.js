@@ -45,6 +45,7 @@ function createSpriteMap(svgOptions = {}, { notifyOnLoad = true } = {}) {
     const svg = buildSvgForType(type, {
       showOpAmpMarkers: type !== "op_amp",
       showPolarityMarkers: type !== "voltage_source",
+      showPotentiometerWiper: type !== "potentiometer",
       palette,
       ...svgOptions,
     });

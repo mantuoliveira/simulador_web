@@ -17,6 +17,9 @@ import {
   NEWTON_SOURCE_STEPS,
   NEWTON_STEP_TOLERANCE,
   OP_AMP_OUTPUT_TERMINAL_INDEX,
+  POTENTIOMETER_LEFT_TERMINAL_INDEX,
+  POTENTIOMETER_RIGHT_TERMINAL_INDEX,
+  POTENTIOMETER_WIPER_TERMINAL_INDEX,
   isBjtComponentType,
   isGroundReferencedVoltageSourceComponent,
   isIdealVoltageSourceComponent,
@@ -32,6 +35,7 @@ import {
   evaluateNotGateModel,
   evaluateOpAmpModel,
   evaluateOrGateModel,
+  getPotentiometerSectionResistances,
   evaluateXorGateModel,
   evaluateZenerModel,
   maxAbsValue,
@@ -279,6 +283,26 @@ function simulateCircuit({
       const current = (v0 - v1) / safeResistance(component.value);
       componentCurrents.set(component.id, current);
       componentPowers.set(component.id, safeResistance(component.value) * current * current);
+    } else if (component.type === "potentiometer") {
+      const leftRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_LEFT_TERMINAL_INDEX)
+      );
+      const wiperRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_WIPER_TERMINAL_INDEX)
+      );
+      const rightRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_RIGHT_TERMINAL_INDEX)
+      );
+      const vLeft = nodeVoltageByRoot.get(leftRoot) ?? 0;
+      const vWiper = nodeVoltageByRoot.get(wiperRoot) ?? 0;
+      const vRight = nodeVoltageByRoot.get(rightRoot) ?? 0;
+      const { leftResistance, rightResistance } = getPotentiometerSectionResistances(component);
+      const leftCurrent = (vLeft - vWiper) / safeResistance(leftResistance);
+      const rightCurrent = (vWiper - vRight) / safeResistance(rightResistance);
+      componentPowers.set(
+        component.id,
+        leftResistance * leftCurrent * leftCurrent + rightResistance * rightCurrent * rightCurrent
+      );
     } else if (component.type === "capacitor") {
       componentCurrents.set(component.id, 0);
     } else if (component.type === "cccs") {
@@ -458,6 +482,24 @@ function buildLinearMnaSystem(
 
     if (component.type === "resistor") {
       stampConductance(A, n0, n1, 1 / safeResistance(component.value));
+    }
+
+    if (component.type === "potentiometer") {
+      const leftRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_LEFT_TERMINAL_INDEX)
+      );
+      const wiperRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_WIPER_TERMINAL_INDEX)
+      );
+      const rightRoot = rootByTerminal.get(
+        terminalKey(component.id, POTENTIOMETER_RIGHT_TERMINAL_INDEX)
+      );
+      const leftNode = getNodeIdx(leftRoot);
+      const wiperNode = getNodeIdx(wiperRoot);
+      const rightNode = getNodeIdx(rightRoot);
+      const { leftResistance, rightResistance } = getPotentiometerSectionResistances(component);
+      stampConductance(A, leftNode, wiperNode, 1 / safeResistance(leftResistance));
+      stampConductance(A, wiperNode, rightNode, 1 / safeResistance(rightResistance));
     }
 
     if (component.type === "capacitor") {
