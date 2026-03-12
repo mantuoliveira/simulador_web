@@ -1,5 +1,5 @@
-import { COMPONENT_DEFS, COMPONENT_ORDER } from "../core/constants.js";
-import { formatEngineeringValue, formatResistance, formatSymmetricVoltage } from "../core/support.js";
+import { COMPONENT_DEFS, COMPONENT_ORDER, OP_AMP_OPEN_LOOP_GAIN } from "../core/constants.js";
+import { formatEngineeringValue, formatResistance } from "../core/support.js";
 import { state } from "../runtime/state.js";
 import { showStatus } from "../editor/ui.js";
 
@@ -8,6 +8,11 @@ import { showStatus } from "../editor/ui.js";
 function formatPotentiometerPosition(value) {
   const percent = Math.max(0, Math.min(100, Math.round((value ?? 0.5) * 100)));
   return `${percent}%`;
+}
+
+function formatOpAmpGain(component) {
+  const gainKvPerV = Number.isFinite(component?.av) ? component.av : OP_AMP_OPEN_LOOP_GAIN / 1000;
+  return `Av = ${gainKvPerV.toFixed(0)} kV/V`;
 }
 
 function formatComponentValue(component) {
@@ -22,7 +27,7 @@ function formatComponentValue(component) {
   if (type === "voltage_node") return formatEngineeringValue(value, "V");
   if (type === "current_source") return formatEngineeringValue(value, "A");
   if (type === "cccs") return `${value} A/A`;
-  if (type === "op_amp") return formatSymmetricVoltage(value);
+  if (type === "op_amp") return formatOpAmpGain(component);
   if (type === "bjt_npn" || type === "bjt_pnp") return `β = ${value}`;
   if (type === "mosfet_n" || type === "mosfet_p") {
     const k = component.k != null ? component.k : 0.01;
@@ -61,6 +66,23 @@ function buildBomGroups() {
   return ordered;
 }
 
+function buildValueGroups(components) {
+  const valueGroups = new Map();
+
+  for (const component of components) {
+    const valueLabel = formatComponentValue(component);
+    if (!valueGroups.has(valueLabel)) {
+      valueGroups.set(valueLabel, []);
+    }
+    valueGroups.get(valueLabel).push(component);
+  }
+
+  return Array.from(valueGroups.entries()).map(([valueLabel, groupedComponents]) => ({
+    valueLabel,
+    quantity: groupedComponents.length,
+  }));
+}
+
 function buildBomHtml(groups) {
   const date = new Date().toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -70,44 +92,19 @@ function buildBomHtml(groups) {
 
   const totalComponents = groups.reduce((sum, g) => sum + g.components.length, 0);
 
-  const rows = groups.map(({ type, components }) => {
+  const rows = groups.flatMap(({ type, components }) => {
     const def = COMPONENT_DEFS[type];
     const label = def?.label ?? type;
+    const valueGroups = buildValueGroups(components);
 
-    if (components.length === 1) {
-      return `
+    return valueGroups.map(
+      ({ quantity, valueLabel }) => `
         <tr>
-          <td class="qty">1</td>
+          <td class="qty">${quantity}</td>
           <td>${label}</td>
-          <td class="value">${formatComponentValue(components[0])}</td>
-        </tr>`;
-    }
-
-    // Multiple components of same type — check if all have same value
-    const allSameValue = components.every(
-      (c) => formatComponentValue(c) === formatComponentValue(components[0])
-    );
-
-    if (allSameValue) {
-      return `
-        <tr>
-          <td class="qty">${components.length}</td>
-          <td>${label}</td>
-          <td class="value">${formatComponentValue(components[0])}</td>
-        </tr>`;
-    }
-
-    // Different values — one row per component
-    return components
-      .map(
-        (c, i) => `
-        <tr>
-          <td class="qty">1</td>
-          <td>${label}${components.length > 1 ? ` (${i + 1})` : ""}</td>
-          <td class="value">${formatComponentValue(c)}</td>
+          <td class="value">${valueLabel}</td>
         </tr>`
-      )
-      .join("");
+    );
   });
 
   return `<!DOCTYPE html>
