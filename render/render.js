@@ -244,7 +244,9 @@ function drawComponents(renderTarget, showSelection = true) {
     const spriteX = -width / 2 + renderOffsetX;
     const spriteY = -height / 2 + renderOffsetY;
 
-    if (renderSprite) {
+    if (component.type === "capacitor") {
+      drawCapacitorSymbol(renderTarget, component, thermalTint);
+    } else if (renderSprite) {
       context.drawImage(renderSprite, spriteX, spriteY, width, height);
     } else if (width > 0 && height > 0) {
       context.fillStyle = thermalTint || palette.canvasSpriteFallback;
@@ -326,6 +328,45 @@ function getTerminalRenderRadius(componentType) {
   const minRadius = isJunction ? 4.2 : 3.4;
   const maxRadius = isJunction ? 10.8 : 8.8;
   return clamp(worldLengthToScreen(gridRadius), minRadius, maxRadius);
+}
+
+function drawCapacitorSymbol(renderTarget, component, strokeColor) {
+  const { context } = renderTarget;
+  const palette = getRenderThemePalette(renderTarget);
+  const spriteToLocalX = (spriteValue) => (spriteValue - 80) / 40;
+  const spriteToLocalY = (spriteValue) => (spriteValue - 40) / 40;
+  const polarized = component.polarized !== false;
+
+  context.strokeStyle = strokeColor || palette.canvasSpriteStroke;
+  context.lineWidth = worldLengthToScreen(0.15);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.beginPath();
+  context.moveTo(worldLengthToScreen(spriteToLocalX(0)), worldLengthToScreen(spriteToLocalY(40)));
+  context.lineTo(worldLengthToScreen(spriteToLocalX(66)), worldLengthToScreen(spriteToLocalY(40)));
+  context.moveTo(worldLengthToScreen(spriteToLocalX(66)), worldLengthToScreen(spriteToLocalY(18)));
+  context.lineTo(worldLengthToScreen(spriteToLocalX(66)), worldLengthToScreen(spriteToLocalY(62)));
+  context.moveTo(worldLengthToScreen(spriteToLocalX(88)), worldLengthToScreen(spriteToLocalY(40)));
+  context.lineTo(worldLengthToScreen(spriteToLocalX(160)), worldLengthToScreen(spriteToLocalY(40)));
+
+  if (polarized) {
+    context.moveTo(worldLengthToScreen(spriteToLocalX(94)), worldLengthToScreen(spriteToLocalY(18)));
+    context.quadraticCurveTo(
+      worldLengthToScreen(spriteToLocalX(78)),
+      worldLengthToScreen(spriteToLocalY(40)),
+      worldLengthToScreen(spriteToLocalX(94)),
+      worldLengthToScreen(spriteToLocalY(62))
+    );
+    context.moveTo(worldLengthToScreen(spriteToLocalX(38)), worldLengthToScreen(spriteToLocalY(26)));
+    context.lineTo(worldLengthToScreen(spriteToLocalX(50)), worldLengthToScreen(spriteToLocalY(26)));
+    context.moveTo(worldLengthToScreen(spriteToLocalX(44)), worldLengthToScreen(spriteToLocalY(20)));
+    context.lineTo(worldLengthToScreen(spriteToLocalX(44)), worldLengthToScreen(spriteToLocalY(32)));
+  } else {
+    context.moveTo(worldLengthToScreen(spriteToLocalX(88)), worldLengthToScreen(spriteToLocalY(18)));
+    context.lineTo(worldLengthToScreen(spriteToLocalX(88)), worldLengthToScreen(spriteToLocalY(62)));
+  }
+
+  context.stroke();
 }
 
 function drawComponentSelectionOutline(renderTarget, component) {

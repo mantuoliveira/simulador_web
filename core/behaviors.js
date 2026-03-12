@@ -394,6 +394,9 @@ const COMPONENT_BEHAVIORS = {
   },
   capacitor: {
     ...DEFAULT_COMPONENT_BEHAVIOR,
+    createState: () => ({
+      polarized: true,
+    }),
     buildSvg: (options = {}) => buildCapacitorSvg(options),
     formatValue: (component) => formatEngineeringValue(component.value, "F"),
     formatWheelValue: (component) => `C=${formatEngineeringValueFixed(component.value, "F", 1)}`,
@@ -412,6 +415,10 @@ const COMPONENT_BEHAVIORS = {
       }
 
       return { ok: true, value };
+    },
+    toggleEditableParameter(component) {
+      component.polarized = component.polarized !== true;
+      return true;
     },
     getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
     isSimulatedBranch: true,
