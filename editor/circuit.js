@@ -304,7 +304,7 @@ function addComponent(type) {
     return;
   }
 
-  state.preferredComponentPositions.set(type, { x: spot.x, y: spot.y });
+  rememberComponentPosition(result.component);
   selectComponent(result.component.id);
   onCircuitChanged();
 }
@@ -477,6 +477,49 @@ function getWireEndpointAtPoint(wire, point) {
   return null;
 }
 
+function pointWithinPlacementBounds(point, bounds) {
+  return (
+    !!point &&
+    point.x >= bounds.minX &&
+    point.x <= bounds.maxX &&
+    point.y >= bounds.minY &&
+    point.y <= bounds.maxY
+  );
+}
+
+function rememberComponentPosition(component, circuit = state) {
+  if (!component || !(circuit?.preferredComponentPositions instanceof Map)) {
+    return;
+  }
+
+  circuit.preferredComponentPositions.set(component.type, {
+    x: component.x,
+    y: component.y,
+  });
+}
+
+function getPlacementAnchor(type, bounds) {
+  const viewportCenter = screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
+  const lastPos = state.preferredComponentPositions.get(type);
+  if (pointWithinPlacementBounds(lastPos, bounds)) {
+    return lastPos;
+  }
+
+  const visibleSameTypeComponents = state.components.filter(
+    (component) => component.type === type && pointWithinPlacementBounds(component, bounds)
+  );
+
+  if (visibleSameTypeComponents.length > 0) {
+    return visibleSameTypeComponents.reduce((best, component) => {
+      const bestDistance = Math.hypot(best.x - viewportCenter.x, best.y - viewportCenter.y);
+      const componentDistance = Math.hypot(component.x - viewportCenter.x, component.y - viewportCenter.y);
+      return componentDistance < bestDistance ? component : best;
+    });
+  }
+
+  return viewportCenter;
+}
+
 function findEmptySpot(type) {
   const def = COMPONENT_DEFS[type];
   if (!def) return null;
@@ -493,15 +536,7 @@ function findEmptySpot(type) {
 
   if (minX > maxX || minY > maxY) return null;
 
-  const lastPos = state.preferredComponentPositions.get(type);
-  const lastPosVisible =
-    lastPos != null &&
-    lastPos.x >= minX && lastPos.x <= maxX &&
-    lastPos.y >= minY && lastPos.y <= maxY;
-
-  const anchor = lastPosVisible
-    ? lastPos
-    : screenToWorld(appEls.canvas.clientWidth * 0.5, appEls.canvas.clientHeight * 0.5);
+  const anchor = getPlacementAnchor(type, { minX, maxX, minY, maxY });
 
   const baseX = clamp(Math.round(anchor.x), minX, maxX);
   const baseY = clamp(Math.round(anchor.y), minY, maxY);
@@ -758,6 +793,10 @@ function moveSelectedComponentsInCircuit(circuit, anchorComponentId, targetX, ta
     return { ok: false };
   }
 
+  for (const component of movedComponents) {
+    rememberComponentPosition(component, circuit);
+  }
+
   return {
     ok: true,
     selectionChanged: clearInvalidSelectionsInCircuit(circuit),
@@ -810,6 +849,7 @@ function moveComponentInCircuit(circuit, componentId, targetX, targetY) {
   }
 
   const selectionChanged = clearInvalidSelectionsInCircuit(circuit);
+  rememberComponentPosition(component, circuit);
   return { ok: true, component, selectionChanged };
 }
 
@@ -1046,6 +1086,10 @@ function componentsBodiesOverlap(a, b, padding = 0) {
   );
 }
 
+function shouldBlockAutoContactForBodyOverlap(a, b) {
+  return a?.type !== "junction" && b?.type !== "junction" && componentsBodiesOverlap(a, b, 0);
+}
+
 function componentsHaveCoincidentTerminalsInCircuit(circuit, firstComponentId, secondComponentId) {
   const firstComponent = getComponentByIdFromCollection(circuit.components, firstComponentId);
   const secondComponent = getComponentByIdFromCollection(circuit.components, secondComponentId);
@@ -1100,7 +1144,7 @@ function findAutoContactCandidateForTargetsInCircuit(circuit, movingComponentId,
   const matchKeys = new Set();
 
   for (const targetComponent of overlappingComponents) {
-    if (componentsBodiesOverlap(movingComponent, targetComponent, 0)) {
+    if (shouldBlockAutoContactForBodyOverlap(movingComponent, targetComponent)) {
       return null;
     }
 
@@ -1550,6 +1594,7 @@ function toggleComponentInGroupSelection(componentId) {
     state.selectedComponentIds.add(componentId);
   }
 
+  rememberComponentPosition(getComponentById(componentId));
   updateSelectionUi();
   return state.selectedComponentIds.has(componentId);
 }
@@ -1573,8 +1618,10 @@ function selectComponent(componentId) {
   const previousSelectedComponentId = state.selectedComponentId;
   clearSelectionState();
   state.selectedComponentId = componentId;
+  const component = getComponentById(componentId);
+  rememberComponentPosition(component);
   if (previousSelectedComponentId !== componentId) {
-    resetEditableParameter(getComponentById(componentId));
+    resetEditableParameter(component);
   }
   updateSelectionUi();
 }

@@ -257,6 +257,7 @@ function clearCircuit() {
   state.components = [];
   state.wires = [];
   state.terminalLabels.clear();
+  state.preferredComponentPositions.clear();
   state.nextComponentId = 1;
   state.nextWireId = 1;
   state.nextSplitGroupId = 1;

@@ -75,6 +75,10 @@ function applyImportedCircuit(data) {
 
   state.components = components;
   state.wires = wires;
+  state.preferredComponentPositions.clear();
+  for (const component of components) {
+    state.preferredComponentPositions.set(component.type, { x: component.x, y: component.y });
+  }
 
   state.terminalLabels.clear();
   if (Array.isArray(terminalLabels)) {
