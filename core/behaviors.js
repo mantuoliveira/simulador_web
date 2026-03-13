@@ -310,14 +310,18 @@ const COMPONENT_BEHAVIORS = {
       const value = parseEngineeringValue(rawText);
       return Number.isFinite(value) ? { ok: true, value } : { ok: false, message: "Valor invalido" };
     },
-    getValueLabelAnchor: (component) => getCardinalValueLabelAnchor(component, 1.62),
+    getValueLabelAnchor: (component) => {
+      const rotation = normalizeRotation(component.rotation);
+      const offset = rotation === 90 || rotation === 270 ? 2.05 : 1.62;
+      return getCardinalValueLabelAnchor(component, offset);
+    },
     isSimulatedBranch: true,
     supportsCurrentArrow: true,
     getReachabilityTerminalPairs: () => [[0, 1]],
     spriteOverlay: "voltage_source_polarity",
     getCurrentArrowLayout: (component, geometry) => ({
       sideSign: getPointProjectionSideSign(
-        getCardinalValueLabelAnchor(component, 1.62),
+        COMPONENT_BEHAVIORS.voltage_source.getValueLabelAnchor(component),
         geometry.midX,
         geometry.midY,
         geometry.normalX,
@@ -556,7 +560,7 @@ const COMPONENT_BEHAVIORS = {
     },
     getValueLabelAnchor: (component) => {
       const rotation = normalizeRotation(component.rotation);
-      const offset = rotation === 90 || rotation === 270 ? 2.15 : 1.62;
+      const offset = rotation === 90 || rotation === 270 ? 2.65 : 1.62;
       return getReverseCardinalValueLabelAnchor(component, offset);
     },
     isSimulatedBranch: true,
