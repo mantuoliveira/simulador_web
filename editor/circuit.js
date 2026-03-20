@@ -2207,6 +2207,20 @@ function deriveSelectionUiState() {
     syncWheel: false,
   };
 
+  const finalizeUiState = (nextUiState) => {
+    nextUiState.showMore =
+      nextUiState.showEditComponentLabel ||
+      nextUiState.showThermal ||
+      nextUiState.showBom ||
+      nextUiState.showImport ||
+      nextUiState.showExport ||
+      nextUiState.showPng ||
+      nextUiState.showCurrentArrow ||
+      nextUiState.showRotate ||
+      nextUiState.showSwap;
+    return nextUiState;
+  };
+
   if (groupSelectionActive) {
     uiState.resetDeleteHold = true;
     uiState.showEditComponentLabel = false;
@@ -2215,8 +2229,7 @@ function deriveSelectionUiState() {
     uiState.groupSelectActive = true;
     uiState.showExport = canExport && !hasGroupedComponents;
     uiState.showPng = canExport && !hasGroupedComponents;
-    uiState.showMore = uiState.showExport || uiState.showPng;
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   if (!component && !wire && !nodeMarker && !terminalLabelSelected && !terminalPending) {
@@ -2230,9 +2243,8 @@ function deriveSelectionUiState() {
     uiState.showImport = true;
     uiState.showExport = canExport;
     uiState.showPng = canExport;
-    uiState.showMore = true;
     uiState.showGroupSelect = canExport;
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   if (terminalPending) {
@@ -2247,12 +2259,12 @@ function deriveSelectionUiState() {
         hidden: state.hiddenNodeMarkerRoots.has(nodeMarker.root),
       };
     }
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   if (terminalLabelSelected) {
     uiState.showDelete = true;
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   if (nodeMarker) {
@@ -2263,13 +2275,13 @@ function deriveSelectionUiState() {
         hidden: state.hiddenNodeMarkerRoots.has(nodeMarker.root),
       };
     }
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   uiState.showDelete = true;
 
   if (!component) {
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   uiState.showEditComponentLabel = canEditComponentLabel(component);
@@ -2295,13 +2307,13 @@ function deriveSelectionUiState() {
 
   const def = COMPONENT_DEFS[component.type];
   if (!def.editable) {
-    return uiState;
+    return finalizeUiState(uiState);
   }
 
   uiState.showValueWheel = true;
   uiState.wheelTitle = "";
   uiState.syncWheel = true;
-  return uiState;
+  return finalizeUiState(uiState);
 }
 
 function applySelectionUiState(uiState) {
@@ -2316,7 +2328,10 @@ function applySelectionUiState(uiState) {
   appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
   appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
   appEls.moreBtn.classList.toggle("hidden", !uiState.showMore);
-  if (!uiState.showMore) appEls.managerialActions.classList.remove("open");
+  if (!uiState.showMore) {
+    appEls.managerialActions.classList.remove("open");
+    appEls.moreBtn.setAttribute("aria-expanded", "false");
+  }
   appEls.bomBtn.classList.toggle("hidden", !uiState.showBom);
   appEls.importBtn.classList.toggle("hidden", !uiState.showImport);
   appEls.groupSelectBtn.classList.toggle("hidden", !uiState.showGroupSelect);

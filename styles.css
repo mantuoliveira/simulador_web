@@ -375,11 +375,19 @@ body {
 }
 
 #managerial-actions {
-  display: contents;
-}
-
-#more-btn {
   display: none;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  background: var(--secondary-bg);
+  border: 1px solid var(--secondary-border);
+  border-radius: 20px;
+  padding: 6px 10px;
+  box-shadow: 0 -2px 16px rgba(15, 23, 42, 0.14);
+  z-index: 30;
 }
 
 #center-actions {
@@ -388,6 +396,16 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+#managerial-actions.open {
+  display: flex;
+}
+
+#more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 button {
@@ -627,34 +645,6 @@ button.secondary.danger {
 
 .hidden {
   display: none !important;
-}
-
-@media (pointer: coarse) {
-  #more-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #managerial-actions {
-    display: none;
-    flex-direction: row;
-    gap: 10px;
-    align-items: center;
-    position: absolute;
-    bottom: calc(100% + 10px);
-    right: 0;
-    background: var(--secondary-bg);
-    border: 1px solid var(--secondary-border);
-    border-radius: 20px;
-    padding: 6px 10px;
-    box-shadow: 0 -2px 16px rgba(15, 23, 42, 0.14);
-    z-index: 30;
-  }
-
-  #managerial-actions.open {
-    display: flex;
-  }
 }
 
 @media (pointer: coarse) and (max-width: 520px) {
