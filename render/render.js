@@ -16,6 +16,7 @@ import {
   getCardinalValueLabelAnchor,
   getComponentRenderBounds,
   getOpAmpInputTerminalIndices,
+  getReverseCardinalValueLabelAnchor,
   terminalKey,
 } from "../core/model.js";
 import {
@@ -39,6 +40,7 @@ import {
   getRenderThemePalette,
 } from "../runtime/state.js";
 import {
+  getComponentLabel,
   getTerminalLabel,
   getTerminalLabelDirection,
   getTerminalPosition,
@@ -309,6 +311,14 @@ function drawComponents(renderTarget, showSelection = true) {
 
     drawComponentTerminalLabels(renderTarget, component);
 
+    const componentLabel = getComponentLabel(component.id);
+    if (componentLabel) {
+      drawComponentLabel(renderTarget, component, componentLabel, {
+        selected:
+          state.selectedComponentId === component.id || isComponentGroupSelected(component.id),
+      });
+    }
+
     if (def.editable && def.showValueLabel !== false && component.valueLabelHidden !== true) {
       const labelPoint = getComponentCanvasValueLabelAnchor(component);
       const screenPoint = worldToScreen(labelPoint.x, labelPoint.y);
@@ -465,6 +475,41 @@ function getComponentCanvasValueLabelAnchor(component) {
   }
 
   return getValueLabelAnchor(component);
+}
+
+function getComponentCanvasNameLabelAnchor(component) {
+  const valueAnchor = getComponentCanvasValueLabelAnchor(component);
+  if (!valueAnchor) {
+    return getReverseCardinalValueLabelAnchor(component, 1.8);
+  }
+
+  const offsetX = valueAnchor.x - component.x;
+  const offsetY = valueAnchor.y - component.y;
+  if (Math.abs(offsetX) < 0.001 && Math.abs(offsetY) < 0.001) {
+    return getReverseCardinalValueLabelAnchor(component, 1.8);
+  }
+
+  return {
+    x: component.x - offsetX,
+    y: component.y - offsetY,
+  };
+}
+
+function drawComponentLabel(renderTarget, component, label, { selected = false } = {}) {
+  const anchor = getComponentCanvasNameLabelAnchor(component);
+  if (!anchor) return;
+
+  const { context } = renderTarget;
+  const palette = getRenderThemePalette(renderTarget);
+  const screenPoint = worldToScreen(anchor.x, anchor.y);
+  const textLayout = getTerminalLabelTextLayout(context, label);
+
+  context.fillStyle = selected ? palette.canvasLabelSelected : palette.canvasLabel;
+  drawTerminalLabelText(context, {
+    textX: screenPoint.x,
+    textY: screenPoint.y,
+    textLayout,
+  });
 }
 
 function drawComponentTerminalLabels(renderTarget, component) {

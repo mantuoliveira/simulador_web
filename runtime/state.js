@@ -102,6 +102,7 @@ const appEls = {
   canvas: document.getElementById("circuit-canvas"),
   simulateBtn: document.getElementById("simulate-btn"),
   themeToggleBtn: document.getElementById("theme-toggle-btn"),
+  editComponentLabelBtn: document.getElementById("edit-component-label-btn"),
   editTerminalLabelBtn: document.getElementById("edit-terminal-label-btn"),
   thermalBtn: document.getElementById("thermal-btn"),
   moreBtn: document.getElementById("more-btn"),
@@ -126,6 +127,10 @@ const appEls = {
   terminalLabelForm: document.getElementById("terminal-label-form"),
   terminalLabelInput: document.getElementById("terminal-label-input"),
   terminalLabelCancel: document.getElementById("terminal-label-cancel"),
+  componentLabelModal: document.getElementById("component-label-modal"),
+  componentLabelForm: document.getElementById("component-label-form"),
+  componentLabelInput: document.getElementById("component-label-input"),
+  componentLabelCancel: document.getElementById("component-label-cancel"),
   manualValueModal: document.getElementById("manual-value-modal"),
   manualValueForm: document.getElementById("manual-value-form"),
   manualValueTitle: document.getElementById("manual-value-title"),
@@ -210,6 +215,10 @@ const terminalLabelEditorState = {
   terminalRef: null,
 };
 
+const componentLabelEditorState = {
+  componentId: null,
+};
+
 const manualValueEditorState = {
   componentId: null,
 };
@@ -254,6 +263,7 @@ export {
   deleteButtonHoldState,
   exportButtonHoldState,
   terminalLabelEditorState,
+  componentLabelEditorState,
   manualValueEditorState,
   themeState,
   themePalette,

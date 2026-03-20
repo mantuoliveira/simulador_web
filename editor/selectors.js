@@ -48,6 +48,11 @@ function getTerminalLabel(componentId, terminalIndex, circuit = state) {
   return circuit.terminalLabels.get(terminalKey(componentId, terminalIndex)) || "";
 }
 
+function getComponentLabel(componentId, circuit = state) {
+  const component = getComponentById(componentId, circuit);
+  return String(component?.componentLabel || "").trim();
+}
+
 function getSelectedNodeMarker(circuit = state) {
   if (circuit.selectedNodeMarkerRoot == null || !circuit.simulationResult?.ok) {
     return null;
@@ -83,6 +88,7 @@ export {
   getTerminalLabelDirection,
   isTerminalConnected,
   getTerminalLabel,
+  getComponentLabel,
   getSelectedNodeMarker,
   getNodeMarkerRootForTerminal,
 };

@@ -280,6 +280,7 @@ body {
 }
 
 #terminal-label-modal,
+#component-label-modal,
 #manual-value-modal {
   position: absolute;
   inset: 0;

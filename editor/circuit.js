@@ -30,6 +30,7 @@ import {
   clearNodeMarkerSelection,
   clearSelectionState,
   clearSimulationState,
+  componentLabelEditorState,
   deleteButtonHoldState,
   mainRenderTarget,
   state,
@@ -2183,6 +2184,7 @@ function deriveSelectionUiState() {
 
   const uiState = {
     showThemeToggle: false,
+    showEditComponentLabel: false,
     showEditTerminalLabel: terminalLabelTarget != null,
     showThermal: false,
     thermalActive: false,
@@ -2207,6 +2209,7 @@ function deriveSelectionUiState() {
 
   if (groupSelectionActive) {
     uiState.resetDeleteHold = true;
+    uiState.showEditComponentLabel = false;
     uiState.showEditTerminalLabel = false;
     uiState.showGroupSelect = canExport;
     uiState.groupSelectActive = true;
@@ -2219,6 +2222,7 @@ function deriveSelectionUiState() {
   if (!component && !wire && !nodeMarker && !terminalLabelSelected && !terminalPending) {
     uiState.resetDeleteHold = true;
     uiState.showThemeToggle = true;
+    uiState.showEditComponentLabel = false;
     uiState.showEditTerminalLabel = false;
     uiState.showThermal = state.simulationActive && state.simulationResult?.ok;
     uiState.thermalActive = state.thermalModeActive === true;
@@ -2268,6 +2272,8 @@ function deriveSelectionUiState() {
     return uiState;
   }
 
+  uiState.showEditComponentLabel = canEditComponentLabel(component);
+
   const componentVisibilityMode = getComponentVisibilityToggleMode(component);
   if (componentVisibilityMode === "value") {
     uiState.showCurrentArrow = true;
@@ -2305,6 +2311,7 @@ function applySelectionUiState(uiState) {
   }
 
   appEls.themeToggleBtn.classList.toggle("hidden", !uiState.showThemeToggle);
+  appEls.editComponentLabelBtn.classList.toggle("hidden", !uiState.showEditComponentLabel);
   appEls.editTerminalLabelBtn.classList.toggle("hidden", !uiState.showEditTerminalLabel);
   appEls.thermalBtn.classList.toggle("hidden", !uiState.showThermal);
   appEls.thermalBtn.classList.toggle("thermal-active", !!uiState.thermalActive);
@@ -2551,6 +2558,15 @@ function getTerminalLabel(componentId, terminalIndex) {
   return state.terminalLabels.get(terminalKey(componentId, terminalIndex)) || "";
 }
 
+function canEditComponentLabel(component) {
+  return !!component && component.type !== "junction";
+}
+
+function getComponentLabel(componentId) {
+  const component = getComponentById(componentId);
+  return String(component?.componentLabel || "").trim();
+}
+
 function getTerminalLabelEditorTarget() {
   if (state.pendingTerminal) {
     return cloneTerminalRef(state.pendingTerminal);
@@ -2583,6 +2599,38 @@ function setTerminalLabel(componentId, terminalIndex, label) {
   return true;
 }
 
+function setComponentLabel(componentId, label) {
+  const component = getComponentById(componentId);
+  if (!component || !canEditComponentLabel(component)) {
+    return false;
+  }
+
+  const trimmed = String(label || "").trim();
+  if (!trimmed) {
+    delete component.componentLabel;
+    return false;
+  }
+
+  component.componentLabel = trimmed;
+  return true;
+}
+
+function openComponentLabelEditor(componentId) {
+  const component = getComponentById(componentId);
+  if (!component || !canEditComponentLabel(component)) {
+    return;
+  }
+
+  componentLabelEditorState.componentId = componentId;
+  appEls.componentLabelInput.value = getComponentLabel(componentId);
+  appEls.componentLabelModal.classList.remove("hidden");
+  appEls.componentLabelModal.setAttribute("aria-hidden", "false");
+  setTimeout(() => {
+    appEls.componentLabelInput.focus();
+    appEls.componentLabelInput.select();
+  }, 0);
+}
+
 function openTerminalLabelEditor(terminalRef) {
   terminalLabelEditorState.terminalRef = cloneTerminalRef(terminalRef);
   appEls.terminalLabelInput.value = getTerminalLabel(terminalRef.componentId, terminalRef.terminalIndex);
@@ -2594,10 +2642,34 @@ function openTerminalLabelEditor(terminalRef) {
   }, 0);
 }
 
+function closeComponentLabelEditor() {
+  componentLabelEditorState.componentId = null;
+  appEls.componentLabelModal.classList.add("hidden");
+  appEls.componentLabelModal.setAttribute("aria-hidden", "true");
+}
+
 function closeTerminalLabelEditor() {
   terminalLabelEditorState.terminalRef = null;
   appEls.terminalLabelModal.classList.add("hidden");
   appEls.terminalLabelModal.setAttribute("aria-hidden", "true");
+}
+
+function saveComponentLabelFromEditor() {
+  const componentId = componentLabelEditorState.componentId;
+  if (componentId == null) return;
+
+  const hadLabel = !!getComponentLabel(componentId);
+  const hasLabel = setComponentLabel(componentId, appEls.componentLabelInput.value);
+  closeComponentLabelEditor();
+  updateSelectionUi();
+  onCircuitChanged();
+
+  if (hasLabel) {
+    showStatus("Nome do componente salvo");
+    return;
+  }
+
+  showStatus(hadLabel ? "Nome do componente removido" : "Nome do componente vazio", !hadLabel);
 }
 
 function saveTerminalLabelFromEditor() {
@@ -2900,11 +2972,17 @@ export {
   isTerminalConnected,
   getComponentById,
   getWireById,
+  canEditComponentLabel,
+  getComponentLabel,
   getTerminalLabel,
   getTerminalLabelEditorTarget,
+  setComponentLabel,
   setTerminalLabel,
+  openComponentLabelEditor,
   openTerminalLabelEditor,
+  closeComponentLabelEditor,
   closeTerminalLabelEditor,
+  saveComponentLabelFromEditor,
   saveTerminalLabelFromEditor,
   getCardinalValueLabelAnchor,
   getReverseCardinalValueLabelAnchor,

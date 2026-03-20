@@ -33,17 +33,20 @@ import { getSelectedNodeMarker, getTerminalPosition } from "./selectors.js";
 import { getVisibleWorldBounds } from "../runtime/viewport.js";
 import {
   applyDefaultGroundNodeMarkerVisibility,
+  closeComponentLabelEditor,
   closeTerminalLabelEditor,
   findEmptySpot,
   getComponentById,
   getTerminalLabelEditorTarget,
   isComponentPlacementValid,
   onCircuitChanged,
+  openComponentLabelEditor,
   openTerminalLabelEditor,
   removeComponent,
   removeTerminalLabel,
   removeWire,
   rotateComponentInCircuit,
+  saveComponentLabelFromEditor,
   saveTerminalLabelFromEditor,
   terminalKey,
   terminalRefsEqual,
@@ -69,6 +72,7 @@ import {
 function setupButtons() {
   setSimulationButtonState(false);
   updateThemeToggleButtonState();
+  setupComponentLabelModal();
   setupTerminalLabelModal();
   setupManualValueModal();
 
@@ -76,6 +80,11 @@ function setupButtons() {
     applyThemeMode(themeState.mode === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
       announce: true,
     });
+  });
+
+  appEls.editComponentLabelBtn.addEventListener("click", () => {
+    if (state.selectedComponentId == null) return;
+    openComponentLabelEditor(state.selectedComponentId);
   });
 
   appEls.editTerminalLabelBtn.addEventListener("click", () => {
@@ -167,6 +176,23 @@ function setupButtons() {
 
   setupExportButtonGestures();
   setupDeleteButtonGestures();
+}
+
+function setupComponentLabelModal() {
+  appEls.componentLabelForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveComponentLabelFromEditor();
+  });
+
+  appEls.componentLabelCancel.addEventListener("click", () => {
+    closeComponentLabelEditor();
+  });
+
+  appEls.componentLabelModal.addEventListener("pointerdown", (event) => {
+    if (event.target === appEls.componentLabelModal) {
+      closeComponentLabelEditor();
+    }
+  });
 }
 
 function setupTerminalLabelModal() {
@@ -265,6 +291,7 @@ function clearCircuit() {
   clearSimulationState();
 
   setSimulationButtonState(false);
+  closeComponentLabelEditor();
   closeTerminalLabelEditor();
   closeManualValueModal();
   updateSelectionUi();

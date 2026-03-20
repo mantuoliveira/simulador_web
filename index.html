@@ -50,6 +50,24 @@
             </div>
           </form>
         </div>
+        <div id="component-label-modal" class="hidden" aria-hidden="true">
+          <form id="component-label-form" class="terminal-label-card">
+            <label for="component-label-input">Nome do componente</label>
+            <input
+              id="component-label-input"
+              name="component-label"
+              type="text"
+              maxlength="32"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Ex.: R_A"
+            />
+            <div class="terminal-label-actions">
+              <button id="component-label-cancel" class="secondary" type="button">Cancelar</button>
+              <button id="component-label-save" class="primary" type="submit">Salvar</button>
+            </div>
+          </form>
+        </div>
         <div id="manual-value-modal" class="hidden" aria-hidden="true">
           <form id="manual-value-form" class="terminal-label-card">
             <div id="manual-value-title">Valor manual</div>
@@ -124,6 +142,23 @@
           </button>
         </div>
         <div id="center-actions">
+          <button
+            id="edit-component-label-btn"
+            class="secondary hidden"
+            type="button"
+            title="Editar nome do componente"
+            aria-label="Editar nome do componente"
+          >
+            <svg viewBox="0 0 528.899 528.899" aria-hidden="true">
+              <path
+                d="M328.883,89.125l107.59,107.589l-272.34,272.34L56.604,361.465L328.883,89.125z M518.113,63.177l-47.981-47.981
+                c-18.543-18.543-48.653-18.543-67.259,0l-45.961,45.961l107.59,107.59l53.611-53.611
+                C532.495,100.753,532.495,77.559,518.113,63.177z M0.3,512.69c-1.958,8.812,5.998,16.708,14.811,14.565l119.891-29.069
+                L27.473,390.597L0.3,512.69z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
           <button
             id="delete-btn"
             class="secondary danger hidden"
