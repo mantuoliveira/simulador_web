@@ -76,6 +76,11 @@ function setupButtons() {
   setupTerminalLabelModal();
   setupManualValueModal();
 
+  const closeManagerialActions = () => {
+    appEls.managerialActions.classList.remove("open");
+    appEls.moreBtn.setAttribute("aria-expanded", "false");
+  };
+
   appEls.themeToggleBtn.addEventListener("click", () => {
     applyThemeMode(themeState.mode === DARK_THEME ? LIGHT_THEME : DARK_THEME, {
       announce: true,
@@ -99,14 +104,13 @@ function setupButtons() {
     appEls.moreBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
   });
 
-  appEls.managerialActions.addEventListener("click", () => {
-    appEls.managerialActions.classList.remove("open");
-    appEls.moreBtn.setAttribute("aria-expanded", "false");
+  appEls.managerialActions.addEventListener("click", (event) => {
+    event.stopPropagation();
+    // Keep the mobile actions drawer open while using its buttons.
   });
 
   document.addEventListener("click", () => {
-    appEls.managerialActions.classList.remove("open");
-    appEls.moreBtn.setAttribute("aria-expanded", "false");
+    closeManagerialActions();
   });
 
   appEls.bomBtn.addEventListener("click", () => {

@@ -830,6 +830,48 @@ function getLabelBoxWirePenalty(renderTarget, boxX, boxY, boxW, boxH) {
   return penalty;
 }
 
+function getMinGapForDirection(screenPoint, boxW, boxH, direction, baseGap = 8) {
+  let gap = baseGap;
+  const halfBoxW = boxW / 2;
+  const halfBoxH = boxH / 2;
+  const margin = 6;
+
+  for (const component of state.components) {
+    const bounds = getComponentRenderBounds(component);
+    if (!bounds) continue;
+    const tl = worldToScreen(bounds.left, bounds.top);
+    const br = worldToScreen(bounds.right, bounds.bottom);
+    const cLeft = Math.min(tl.x, br.x) - margin;
+    const cRight = Math.max(tl.x, br.x) + margin;
+    const cTop = Math.min(tl.y, br.y) - margin;
+    const cBottom = Math.max(tl.y, br.y) + margin;
+
+    if (direction === "up") {
+      if (screenPoint.x - halfBoxW < cRight && screenPoint.x + halfBoxW > cLeft && cTop < screenPoint.y) {
+        const needed = screenPoint.y - cTop;
+        if (needed > gap) gap = needed;
+      }
+    } else if (direction === "down") {
+      if (screenPoint.x - halfBoxW < cRight && screenPoint.x + halfBoxW > cLeft && cBottom > screenPoint.y) {
+        const needed = cBottom - screenPoint.y;
+        if (needed > gap) gap = needed;
+      }
+    } else if (direction === "left") {
+      if (screenPoint.y - halfBoxH < cBottom && screenPoint.y + halfBoxH > cTop && cLeft < screenPoint.x) {
+        const needed = screenPoint.x - cLeft;
+        if (needed > gap) gap = needed;
+      }
+    } else if (direction === "right") {
+      if (screenPoint.y - halfBoxH < cBottom && screenPoint.y + halfBoxH > cTop && cRight > screenPoint.x) {
+        const needed = cRight - screenPoint.x;
+        if (needed > gap) gap = needed;
+      }
+    }
+  }
+
+  return gap;
+}
+
 function segmentIntersectsRect(start, end, rect) {
   const minX = Math.min(start.x, end.x);
   const maxX = Math.max(start.x, end.x);
@@ -893,16 +935,15 @@ function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalInde
   let bestDirection = directionCandidates[0];
   let bestPenalty = Infinity;
 
+  const DIRECTION_BIAS = { up: 0, right: 0.3, down: 1.5, left: 1.0 };
+
   for (let index = 0; index < directionCandidates.length; index += 1) {
     const direction = directionCandidates[index];
-    const candidate = getDirectionalLabelPlacement(screenPoint, boxW, boxH, direction);
-    const penalty = getLabelBoxWirePenalty(
-      renderTarget,
-      candidate.boxX,
-      candidate.boxY,
-      boxW,
-      boxH
-    );
+    const gap = getMinGapForDirection(screenPoint, boxW, boxH, direction);
+    const candidate = getDirectionalLabelPlacement(screenPoint, boxW, boxH, direction, gap);
+    const wirePenalty = getLabelBoxWirePenalty(renderTarget, candidate.boxX, candidate.boxY, boxW, boxH);
+    const distancePenalty = (gap - 8) * 0.1;
+    const penalty = wirePenalty + distancePenalty + (DIRECTION_BIAS[direction] ?? 0);
 
     if (penalty < bestPenalty) {
       bestPenalty = penalty;
@@ -910,13 +951,14 @@ function getTerminalLabelRenderMetrics(renderTarget, { componentId, terminalInde
       bestDirection = direction;
     }
 
-    if (penalty === 0) {
+    if (wirePenalty === 0 && gap <= 8) {
       break;
     }
   }
 
+  const bestGap = getMinGapForDirection(screenPoint, boxW, boxH, bestDirection);
   const placement =
-    bestPlacement || getDirectionalLabelPlacement(screenPoint, boxW, boxH, bestDirection);
+    bestPlacement || getDirectionalLabelPlacement(screenPoint, boxW, boxH, bestDirection, bestGap);
 
   return {
     label,
