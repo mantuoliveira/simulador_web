@@ -1,4 +1,4 @@
-import { GRID_SIZE, THEME_PALETTE_DEFAULTS } from "../core/constants.js";
+import { COMPONENT_DEFS, GRID_SIZE, THEME_PALETTE_DEFAULTS } from "../core/constants.js";
 import {
   appEls,
   createRenderTarget,
@@ -6,15 +6,23 @@ import {
   state,
 } from "../runtime/state.js";
 import { createSpriteMap } from "../runtime/ui.js";
-import { drawScene } from "../render/render.js";
+import {
+  drawScene,
+  getComponentCanvasNameLabelAnchor,
+  getComponentCanvasValueLabelAnchor,
+  getComponentCanvasValueText,
+  getTerminalLabelTextLayout,
+} from "../render/render.js";
 import { showStatus } from "../editor/ui.js";
 import { getComponentRenderBounds } from "../core/model.js";
+import { getComponentLabel, getTerminalLabel, getTerminalPosition } from "../editor/selectors.js";
 
 const EXPORT_FILENAME_PREFIX = "circuito";
 const EXPORT_TRIM_PADDING_PX = 12;
 const EXPORT_SCALE = 3;
 const EXPORT_ZOOM = 1.0;
 const EXPORT_WORLD_PADDING = 2;
+const EXPORT_TEXT_WORLD_PADDING = 0.25;
 let exportLightSpriteMapPromise = null;
 
 function getExportThemePalette() {
@@ -53,26 +61,112 @@ function computeCircuitWorldBounds() {
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+  const textContext = createTextMeasurementContext();
+  const pxPerWorld = GRID_SIZE * EXPORT_ZOOM;
+
+  const includeWorldRect = (left, top, right, bottom) => {
+    if (left < minX) minX = left;
+    if (top < minY) minY = top;
+    if (right > maxX) maxX = right;
+    if (bottom > maxY) maxY = bottom;
+  };
 
   for (const component of state.components) {
     const b = getComponentRenderBounds(component);
-    if (b.left < minX) minX = b.left;
-    if (b.top < minY) minY = b.top;
-    if (b.right > maxX) maxX = b.right;
-    if (b.bottom > maxY) maxY = b.bottom;
+    includeWorldRect(b.left, b.top, b.right, b.bottom);
+    includeComponentTextBounds(component, textContext, pxPerWorld, includeWorldRect);
   }
 
   for (const wire of state.wires) {
     for (const pt of wire.path) {
-      if (pt.x < minX) minX = pt.x;
-      if (pt.y < minY) minY = pt.y;
-      if (pt.x > maxX) maxX = pt.x;
-      if (pt.y > maxY) maxY = pt.y;
+      includeWorldRect(pt.x, pt.y, pt.x, pt.y);
     }
   }
 
   if (!isFinite(minX)) return null;
   return { minX, minY, maxX, maxY };
+}
+
+function createTextMeasurementContext() {
+  const canvas = createAlphaCanvas();
+  return canvas.getContext("2d", { alpha: true });
+}
+
+function includeComponentTextBounds(component, context, pxPerWorld, includeWorldRect) {
+  if (!context || pxPerWorld <= 0) return;
+
+  includeComponentValueTextBounds(component, context, pxPerWorld, includeWorldRect);
+  includeComponentNameTextBounds(component, context, pxPerWorld, includeWorldRect);
+  includeTerminalLabelTextBounds(component, context, pxPerWorld, includeWorldRect);
+}
+
+function includeComponentValueTextBounds(component, context, pxPerWorld, includeWorldRect) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def?.editable || def.showValueLabel === false || component.valueLabelHidden === true) {
+    return;
+  }
+
+  const anchor = getComponentCanvasValueLabelAnchor(component);
+  const text = getComponentCanvasValueText(component);
+  if (!anchor || !text) return;
+
+  const fontPx = Math.max(16, 16 * EXPORT_ZOOM);
+  context.font = `${fontPx}px "Avenir Next", sans-serif`;
+  const metrics = context.measureText(text);
+  const textHeight = getMeasuredTextHeight(metrics, fontPx);
+  includeCenteredTextWorldRect(anchor, metrics.width, textHeight, pxPerWorld, includeWorldRect);
+}
+
+function includeComponentNameTextBounds(component, context, pxPerWorld, includeWorldRect) {
+  const label = getComponentLabel(component.id);
+  if (!label) return;
+
+  const anchor = getComponentCanvasNameLabelAnchor(component);
+  if (!anchor) return;
+
+  const textLayout = getTerminalLabelTextLayout(context, label);
+  includeCenteredTextWorldRect(
+    anchor,
+    textLayout.totalWidth,
+    textLayout.boxHeight,
+    pxPerWorld,
+    includeWorldRect
+  );
+}
+
+function includeTerminalLabelTextBounds(component, context, pxPerWorld, includeWorldRect) {
+  const def = COMPONENT_DEFS[component.type];
+  if (!def?.terminals) return;
+
+  for (let terminalIndex = 0; terminalIndex < def.terminals.length; terminalIndex += 1) {
+    const label = getTerminalLabel(component.id, terminalIndex);
+    if (!label) continue;
+
+    const terminalPosition = getTerminalPosition(component.id, terminalIndex);
+    if (!terminalPosition) continue;
+
+    const textLayout = getTerminalLabelTextLayout(context, label);
+    const gapPx = 8;
+    const boxW = textLayout.totalWidth + 16;
+    const boxH = textLayout.boxHeight;
+    includeWorldRect(
+      terminalPosition.x - (boxW + gapPx) / pxPerWorld - EXPORT_TEXT_WORLD_PADDING,
+      terminalPosition.y - (boxH + gapPx) / pxPerWorld - EXPORT_TEXT_WORLD_PADDING,
+      terminalPosition.x + (boxW + gapPx) / pxPerWorld + EXPORT_TEXT_WORLD_PADDING,
+      terminalPosition.y + (boxH + gapPx) / pxPerWorld + EXPORT_TEXT_WORLD_PADDING
+    );
+  }
+}
+
+function includeCenteredTextWorldRect(anchor, widthPx, heightPx, pxPerWorld, includeWorldRect) {
+  const halfW = widthPx / pxPerWorld / 2 + EXPORT_TEXT_WORLD_PADDING;
+  const halfH = heightPx / pxPerWorld / 2 + EXPORT_TEXT_WORLD_PADDING;
+  includeWorldRect(anchor.x - halfW, anchor.y - halfH, anchor.x + halfW, anchor.y + halfH);
+}
+
+function getMeasuredTextHeight(metrics, fallbackFontPx) {
+  const actualHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+  return Number.isFinite(actualHeight) && actualHeight > 0 ? actualHeight : fallbackFontPx;
 }
 
 async function exportCircuitBlob({ background = "white" } = {}) {
