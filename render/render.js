@@ -58,6 +58,10 @@ import {
 
 const thermalTintedSpriteCache = new WeakMap();
 const CARDINAL_DIRECTIONS = ["up", "right", "down", "left"];
+const WIRE_BRIDGE_RADIUS = 0.38;
+const WIRE_BRIDGE_HEIGHT = 0.52;
+const WIRE_BRIDGE_ENDPOINT_MARGIN = 0.03;
+const WIRE_SEGMENT_EPSILON = 0.000001;
 
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -200,27 +204,202 @@ function drawGrid(renderTarget) {
 function drawWires(renderTarget, showSelection = true) {
   const { context } = renderTarget;
   const palette = getRenderThemePalette(renderTarget);
+  const visibleWires = state.wires.filter(isWireVisible);
+  const wireBridgeMap = buildWireBridgeMap(visibleWires);
+
   context.lineCap = "round";
   context.lineJoin = "round";
 
-  for (const wire of state.wires) {
-    if (!isWireVisible(wire)) continue;
-
-    context.beginPath();
-    wire.path.forEach((point, index) => {
-      const sp = worldToScreen(point.x, point.y);
-      if (index === 0) {
-        context.moveTo(sp.x, sp.y);
-      } else {
-        context.lineTo(sp.x, sp.y);
-      }
-    });
-
-    const isSelected = showSelection && state.selectedWireId === wire.id;
-    context.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
-    context.strokeStyle = isSelected ? palette.canvasWireSelected : palette.canvasWire;
-    context.stroke();
+  for (const wire of visibleWires) {
+    drawWireBase(renderTarget, wire, wireBridgeMap.get(wire.id), showSelection, palette);
   }
+
+  for (const wire of visibleWires) {
+    drawWireBridgeArcs(renderTarget, wire, wireBridgeMap.get(wire.id), showSelection, palette);
+  }
+}
+
+function drawWireBase(renderTarget, wire, bridgeSegments, showSelection, palette) {
+  const { context } = renderTarget;
+  applyWireStrokeStyle(context, wire, showSelection, palette);
+  context.beginPath();
+
+  for (let i = 0; i < wire.path.length - 1; i += 1) {
+    const start = wire.path[i];
+    const end = wire.path[i + 1];
+    const bridges = bridgeSegments?.get(i);
+
+    if (bridges?.length && isHorizontalWireSegment(start, end)) {
+      drawHorizontalWireSegmentWithGaps(context, start, end, bridges);
+    } else {
+      addWireLine(context, start, end);
+    }
+  }
+
+  context.stroke();
+}
+
+function drawWireBridgeArcs(renderTarget, wire, bridgeSegments, showSelection, palette) {
+  if (!bridgeSegments?.size) return;
+
+  const { context } = renderTarget;
+  applyWireStrokeStyle(context, wire, showSelection, palette);
+  context.beginPath();
+
+  for (const bridges of bridgeSegments.values()) {
+    for (const bridge of bridges) {
+      const start = worldToScreen(bridge.x - WIRE_BRIDGE_RADIUS, bridge.y);
+      const control = worldToScreen(bridge.x, bridge.y - WIRE_BRIDGE_HEIGHT);
+      const end = worldToScreen(bridge.x + WIRE_BRIDGE_RADIUS, bridge.y);
+      context.moveTo(start.x, start.y);
+      context.quadraticCurveTo(control.x, control.y, end.x, end.y);
+    }
+  }
+
+  context.stroke();
+}
+
+function applyWireStrokeStyle(context, wire, showSelection, palette) {
+  const isSelected = showSelection && state.selectedWireId === wire.id;
+  context.lineWidth = Math.max(2.1, state.camera.zoom * 2.4) + (isSelected ? 1.9 : 0);
+  context.strokeStyle = isSelected ? palette.canvasWireSelected : palette.canvasWire;
+}
+
+function drawHorizontalWireSegmentWithGaps(context, start, end, bridges) {
+  const forward = end.x >= start.x;
+  const sortedBridges = [...bridges].sort((a, b) => (forward ? a.x - b.x : b.x - a.x));
+  let cursorX = start.x;
+
+  for (const bridge of sortedBridges) {
+    const gapStartX = bridge.x + (forward ? -WIRE_BRIDGE_RADIUS : WIRE_BRIDGE_RADIUS);
+    const gapEndX = bridge.x + (forward ? WIRE_BRIDGE_RADIUS : -WIRE_BRIDGE_RADIUS);
+
+    addWireLine(context, { x: cursorX, y: start.y }, { x: gapStartX, y: start.y });
+    cursorX = gapEndX;
+  }
+
+  addWireLine(context, { x: cursorX, y: start.y }, end);
+}
+
+function addWireLine(context, start, end) {
+  if (Math.hypot(end.x - start.x, end.y - start.y) <= WIRE_SEGMENT_EPSILON) return;
+
+  const startScreen = worldToScreen(start.x, start.y);
+  const endScreen = worldToScreen(end.x, end.y);
+  context.moveTo(startScreen.x, startScreen.y);
+  context.lineTo(endScreen.x, endScreen.y);
+}
+
+function buildWireBridgeMap(wires) {
+  const horizontalSegments = [];
+  const verticalSegments = [];
+  const bridgeMap = new Map();
+
+  for (const wire of wires) {
+    for (let i = 0; i < wire.path.length - 1; i += 1) {
+      const segment = getWireSegmentMeta(wire, i);
+      if (!segment) continue;
+
+      if (segment.orientation === "horizontal") {
+        horizontalSegments.push(segment);
+      } else if (segment.orientation === "vertical") {
+        verticalSegments.push(segment);
+      }
+    }
+  }
+
+  for (const horizontal of horizontalSegments) {
+    for (const vertical of verticalSegments) {
+      if (horizontal.wire.id === vertical.wire.id) continue;
+
+      const crossing = getOrthogonalSegmentCrossing(horizontal, vertical);
+      if (!crossing) continue;
+
+      addWireBridge(bridgeMap, horizontal, crossing);
+    }
+  }
+
+  return bridgeMap;
+}
+
+function getWireSegmentMeta(wire, segmentIndex) {
+  const start = wire.path[segmentIndex];
+  const end = wire.path[segmentIndex + 1];
+  if (!start || !end) return null;
+
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let orientation = null;
+
+  if (Math.abs(dy) <= WIRE_SEGMENT_EPSILON && Math.abs(dx) > WIRE_SEGMENT_EPSILON) {
+    orientation = "horizontal";
+  } else if (Math.abs(dx) <= WIRE_SEGMENT_EPSILON && Math.abs(dy) > WIRE_SEGMENT_EPSILON) {
+    orientation = "vertical";
+  }
+
+  if (!orientation) return null;
+
+  return {
+    wire,
+    segmentIndex,
+    orientation,
+    start,
+    end,
+    minX: Math.min(start.x, end.x),
+    maxX: Math.max(start.x, end.x),
+    minY: Math.min(start.y, end.y),
+    maxY: Math.max(start.y, end.y),
+  };
+}
+
+function getOrthogonalSegmentCrossing(horizontal, vertical) {
+  const x = vertical.start.x;
+  const y = horizontal.start.y;
+
+  if (!isInsideRange(x, horizontal.minX, horizontal.maxX, WIRE_BRIDGE_RADIUS)) {
+    return null;
+  }
+
+  if (!isInsideRange(y, vertical.minY, vertical.maxY, WIRE_BRIDGE_ENDPOINT_MARGIN)) {
+    return null;
+  }
+
+  return { x, y };
+}
+
+function isInsideRange(value, min, max, margin) {
+  return value > min + margin && value < max - margin;
+}
+
+function addWireBridge(bridgeMap, segment, crossing) {
+  let segmentMap = bridgeMap.get(segment.wire.id);
+  if (!segmentMap) {
+    segmentMap = new Map();
+    bridgeMap.set(segment.wire.id, segmentMap);
+  }
+
+  let bridges = segmentMap.get(segment.segmentIndex);
+  if (!bridges) {
+    bridges = [];
+    segmentMap.set(segment.segmentIndex, bridges);
+  }
+
+  if (bridges.some((bridge) => pointsAlmostEqual(bridge, crossing))) return;
+  bridges.push(crossing);
+}
+
+function pointsAlmostEqual(a, b) {
+  return (
+    Math.abs(a.x - b.x) <= WIRE_SEGMENT_EPSILON &&
+    Math.abs(a.y - b.y) <= WIRE_SEGMENT_EPSILON
+  );
+}
+
+function isHorizontalWireSegment(start, end) {
+  return (
+    Math.abs(start.y - end.y) <= WIRE_SEGMENT_EPSILON &&
+    Math.abs(start.x - end.x) > WIRE_SEGMENT_EPSILON
+  );
 }
 
 function drawComponents(renderTarget, showSelection = true) {
